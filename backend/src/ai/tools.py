@@ -214,7 +214,11 @@ async def execute_tool(
             return json.dumps({"error": f"未知工具: {tool_name}"}, ensure_ascii=False)
 
         try:
-            result = await mcp_manager.call_tool(tool_name, arguments)
+            # ``user`` is forwarded so handlers that declare a ``user`` param
+            # (reserved runtime injection, not exposed in the tool schema)
+            # can enforce row-level data isolation — e.g. knowledge_base's
+            # kb_save / kb_query tools.
+            result = await mcp_manager.call_tool(tool_name, arguments, user=user)
             # Write audit log for AI-agent-triggered MCP tool calls
             if user is not None:
                 await _write_audit_log(db, "tool", tool_name, user, arguments, result)

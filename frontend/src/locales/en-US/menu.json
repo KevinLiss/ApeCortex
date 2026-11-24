@@ -73,5 +73,9 @@
     "noteAdd": "Add Note",
     "noteEdit": "Edit Note",
     "noteDelete": "Delete Note"
+  },
+  "kb": {
+    "label": "AI Knowledge Base",
+    "profile": "Memory Profile"
   }
 }

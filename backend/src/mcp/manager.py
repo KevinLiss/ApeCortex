@@ -28,6 +28,11 @@ if TYPE_CHECKING:
 
 TOOL_CALL_TIMEOUT = 30.0  # default timeout for tool execution (seconds)
 
+# Handler parameters injected by the runtime instead of being supplied by the
+# caller (LLM). They are excluded from the inferred JSON schema so the model
+# can neither see nor spoof them. ``call_tool(user=...)`` injects them.
+_RESERVED_HANDLER_PARAMS = frozenset({"user"})
+
 
 def _derive_registration_path(handler: Callable) -> tuple[str, str]:
     """Derive (module, attr) for re-importing a tool handler on restart.
@@ -337,18 +342,39 @@ class McpManager:
             counts[cat] = counts.get(cat, 0) + 1
         return [{"name": k, "count": v} for k, v in sorted(counts.items())]
 
-    async def call_tool(self, name: str, arguments: dict[str, Any], timeout: float = 30.0) -> Any:
+    async def call_tool(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        timeout: float = 30.0,
+        user: Any = None,
+    ) -> Any:
         """Execute an MCP tool by name with the given arguments.
 
         A timeout guards against hung plugin handlers blocking the caller
         (AI agent turns, SSE sessions, HTTP requests).
+
+        If ``user`` is provided and the handler declares a ``user`` parameter
+        (see ``_RESERVED_HANDLER_PARAMS``), it is injected at call time so the
+        tool can enforce row-level data isolation without trusting the LLM to
+        pass a user identifier. The reserved parameter is never exposed in the
+        tool's JSON schema, so the model cannot spoof it.
         """
         tool = self._tools.get(name)
         if not tool:
             raise ValueError(f"Unknown MCP tool: {name}")
 
+        call_kwargs = dict(arguments)
+        if user is not None:
+            try:
+                handler_params = inspect.signature(tool.handler).parameters
+            except (TypeError, ValueError):
+                handler_params = {}
+            if "user" in handler_params:
+                call_kwargs["user"] = user
+
         async def _invoke() -> Any:
-            result = tool.handler(**arguments)
+            result = tool.handler(**call_kwargs)
             if inspect.isawaitable(result):
                 result = await result
             return result
@@ -458,7 +484,7 @@ class McpManager:
         required: list[str] = []
 
         for param_name, param in sig.parameters.items():
-            if param_name == "self":
+            if param_name == "self" or param_name in _RESERVED_HANDLER_PARAMS:
                 continue
 
             annotation = type_hints.get(param_name, param.annotation)

@@ -73,5 +73,9 @@
     "noteAdd": "新增备忘录",
     "noteEdit": "编辑备忘录",
     "noteDelete": "删除备忘录"
+  },
+  "kb": {
+    "label": "AI 知识库",
+    "profile": "记忆画像"
   }
 }

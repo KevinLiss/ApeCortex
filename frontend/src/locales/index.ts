@@ -7,12 +7,14 @@ import zhCNMenu from './zh-CN/menu.json'
 import zhCNAuth from './zh-CN/auth.json'
 import zhCNDashboard from './zh-CN/dashboard.json'
 import zhCNSystem from './zh-CN/system.json'
+import zhCNKnowledge from './zh-CN/knowledge.json'
 
 import enUSCommon from './en-US/common.json'
 import enUSMenu from './en-US/menu.json'
 import enUSAuth from './en-US/auth.json'
 import enUSDashboard from './en-US/dashboard.json'
 import enUSSystem from './en-US/system.json'
+import enUSKnowledge from './en-US/knowledge.json'
 
 export type Locale = 'zh-CN' | 'en-US'
 
@@ -47,6 +49,7 @@ const i18n: I18n = createI18n({
       auth: zhCNAuth,
       dashboard: zhCNDashboard,
       system: zhCNSystem,
+      knowledge: zhCNKnowledge,
     },
     'en-US': {
       common: enUSCommon,
@@ -54,6 +57,7 @@ const i18n: I18n = createI18n({
       auth: enUSAuth,
       dashboard: enUSDashboard,
       system: enUSSystem,
+      knowledge: enUSKnowledge,
     },
   },
 })

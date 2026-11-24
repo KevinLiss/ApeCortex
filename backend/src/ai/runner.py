@@ -37,6 +37,11 @@ from src.crud.ai import crud_chat_session
 from src.db import SessionLocal
 from src.models import User
 from src.models.ai import AiProvider, ChatMessageModel, ChatRun
+from src.plugins import event_bus
+
+# Event emitted after a chat run finishes successfully. Plugins (e.g. the
+# knowledge_base memory pipeline) subscribe to it for post-turn processing.
+_EVENT_CHAT_COMPLETE = "chat_message_complete"
 
 # ---------------------------------------------------------------- in-memory state
 
@@ -151,6 +156,24 @@ async def _finish_run(
     buf.status = status
     buf.error = error
     await _apublish(buf, {"type": "run_end", "status": status, "error": error})
+
+    # Post-turn hook: let plugins react to a completed conversation turn
+    # (knowledge extraction, etc.). Only fired for successful runs with an
+    # answer, so failed/stopped turns don't produce noise. Handlers are
+    # expected to stay fast and offload real work to background tasks.
+    if status == "done" and buf.answer.strip():
+        try:
+            await event_bus.emit(
+                _EVENT_CHAT_COMPLETE,
+                user_id=run.user_id,
+                session_id=run.session_id,
+                run_id=run.id,
+                question=run.question,
+                answer=buf.answer,
+            )
+        except Exception as exc:  # never break the run pipeline
+            logger.error(f"chat_message_complete emit failed: {exc}")
+
     # Buffer is kept so late subscribers (polling after finish) still see the
     # tail; it is small and bounded per run. Cleanup happens on shutdown.
     logger.info(f"ChatRun {run.id} → {status} (answer {len(buf.answer)} chars)")

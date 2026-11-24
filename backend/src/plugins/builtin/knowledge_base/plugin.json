@@ -1,0 +1,8 @@
+{
+  "name": "knowledge_base",
+  "display_name": "AI 知识库",
+  "version": "0.1.0",
+  "description": "聊天知识自动沉淀与用户画像：对话完成后自动提取值得记忆的事实与偏好（去重合并），形成个人画像，并可通过 MCP 工具 kb_save / kb_query 由 AI 助手主动存取。",
+  "author": "ApeAdmin",
+  "dependencies": []
+}

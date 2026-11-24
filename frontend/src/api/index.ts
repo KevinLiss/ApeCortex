@@ -285,3 +285,10 @@ export const getDevExampleNotes = (params: any) => request.get('/dev-example/not
 export const createDevExampleNote = (data: any) => request.post('/dev-example/notes', data)
 export const updateDevExampleNote = (id: number, data: any) => request.put(`/dev-example/notes/${id}`, data)
 export const deleteDevExampleNote = (id: number) => request.delete(`/dev-example/notes/${id}`)
+
+// ---- Knowledge Base (AI 知识库) ----
+export const getKbMemories = (params: any) => request.get('/knowledge-base/memories', { params })
+export const deleteKbMemory = (id: number) => request.delete(`/knowledge-base/memories/${id}`)
+export const getKbProfile = () => request.get('/knowledge-base/profile')
+export const rewriteKbProfile = () => request.post('/knowledge-base/profile/rewrite')
+export const getKbStats = () => request.get('/knowledge-base/stats')
