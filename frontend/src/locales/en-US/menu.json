@@ -76,6 +76,10 @@
   },
   "kb": {
     "label": "AI Knowledge Base",
-    "profile": "Memory Profile"
+    "profile": "Memory Profile",
+    "spaces": "Knowledge Spaces",
+    "pages": "Wiki Pages",
+    "promotions": "Promotion Review",
+    "tasks": "Task Center"
   }
 }

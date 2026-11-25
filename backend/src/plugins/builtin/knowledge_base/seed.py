@@ -46,11 +46,25 @@ async def seed_knowledge_base_data(db: AsyncSession) -> None:
         await db.flush()
         logger.info("Created 'AI 知识库' top-level menu")
 
-    # ── 2. 子菜单 + 按钮权限 ───────────────────────────
+    # ── 2. 子菜单 + 按钮权限（P1 扩容）─────────────────
     # (name, parent_name, type, path, component, permission, icon, sort, i18n_key)
     menu_specs = [
+        ("知识空间", "AI 知识库", "C", "spaces", "knowledge_base/spaces/index",
+         "knowledge_base:space:list", "Folder", 1, "menu.kb.spaces"),
+        ("新建空间", "知识空间", "F", None, None, "knowledge_base:space:create", None, 1, None),
+        ("词条管理", "AI 知识库", "C", "pages", "knowledge_base/pages/index",
+         "knowledge_base:page:list", "Document", 2, "menu.kb.pages"),
+        ("发布词条", "词条管理", "F", None, None, "knowledge_base:page:publish", None, 1, None),
+        ("编辑词条", "词条管理", "F", None, None, "knowledge_base:page:edit", None, 2, None),
+        ("晋升审核", "AI 知识库", "C", "promotions", "knowledge_base/promotions/index",
+         "knowledge_base:promotion:review", "Stamp", 3, "menu.kb.promotions"),
+        ("提交晋升", "晋升审核", "F", None, None, "knowledge_base:promotion:submit", None, 1, None),
+        ("审核晋升", "晋升审核", "F", None, None, "knowledge_base:promotion:review", None, 2, None),
+        ("任务中心", "AI 知识库", "C", "tasks", "knowledge_base/tasks/index",
+         "knowledge_base:task:list", "Timer", 4, "menu.kb.tasks"),
+        ("重试任务", "任务中心", "F", None, None, "knowledge_base:task:retry", None, 1, None),
         ("记忆画像", "AI 知识库", "C", "profile", "knowledge_base/profile/index",
-         "knowledge_base:profile:list", "User", 1, "menu.kb.profile"),
+         "knowledge_base:profile:list", "User", 5, "menu.kb.profile"),
         ("查询记忆", "记忆画像", "F", None, None, "knowledge_base:profile:list", None, 1, None),
         ("删除记忆", "记忆画像", "F", None, None, "knowledge_base:profile:delete", None, 2, None),
         ("重写画像", "记忆画像", "F", None, None, "knowledge_base:profile:rewrite", None, 3, None),

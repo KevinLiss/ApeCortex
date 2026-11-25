@@ -44,6 +44,8 @@ class KnowledgeBasePlugin(PluginInterface):
     async def install(self) -> None:
         from src.db import engine
 
+        # create_all 幂等：P0 已安装的库升级 P1 时，新表自动补建（SQLite 不做列级 ALTER，
+        # 模型演进遵循"新功能新表"纪律；既有表不删列）
         async with engine.begin() as conn:
             await conn.run_sync(
                 lambda sync_conn: PluginBase.metadata.create_all(sync_conn)
@@ -73,11 +75,30 @@ class KnowledgeBasePlugin(PluginInterface):
             await db.commit()
         logger.info("[KnowledgeBase] uninstalled — tables dropped, menus removed")
 
+    def on_load(self) -> None:
+        """启动时恢复孤儿任务（P1：kb_job 表）。"""
+        import asyncio
+
+        async def _recover() -> None:
+            try:
+                from src.plugins.builtin.knowledge_base.pipeline.jobs import recover_orphan_jobs
+                await recover_orphan_jobs()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(f"[KnowledgeBase] 孤儿任务恢复跳过（表未建/首装）: {exc}")
+
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(_recover())
+        except RuntimeError:
+            pass
+
     # ── 生命周期：注册路由 + 事件 ──────────────────────
     def register(self, app: FastAPI) -> None:
         from src.plugins.builtin.knowledge_base.api import router
+        from src.plugins.builtin.knowledge_base.api_wiki import router as wiki_router
 
         app.include_router(router, prefix=settings.API_PREFIX)
+        app.include_router(wiki_router, prefix=settings.API_PREFIX)
 
         # 订阅聊天完成事件 → 后台记忆提取（handler 内部 spawn 任务，快速返回）
         event_bus.on(
