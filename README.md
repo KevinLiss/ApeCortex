@@ -1,15 +1,17 @@
 <div align="center">
   <br/>
-  <img src="assets/logo.png" width="130" alt="ApeAdmin Logo" />
-  <h1>ApeAdmin</h1>
-  <p>面向现代 AI 应用的开源后台管理框架</p>
+  <img src="assets/logo.png" width="120" alt="ApeAdmin" />
+  <h1>ApeAdmin · AI 知识库</h1>
+  <p><b>把每一次对话，编译成会生长的知识库</b></p>
+  <p>聊天沉淀 · LLM Wiki · 公开库协作 · 联网调研 · MCP 知识接口</p>
 </div>
 
 <p align="center">
-  <a href="http://apehub.finecv.cn/apehub-web">官网</a> ·
-  <a href="http://apehub.finecv.cn/apehub-web/plugins.html">插件市场</a> ·
-  <a href="http://apehub.finecv.cn/apehub-web/docs-portal">开发文档</a> ·
-  <a href="https://apehub.finecv.cn/admin">在线演示</a>
+  <a href="docs/knowledge-base/插件开发规划.md">插件规划</a> ·
+  <a href="docs/knowledge-base/调研笔记-开源对标代码精读.md">24 仓调研笔记</a> ·
+  <a href="docs/plugin-mcp-guide.md">插件开发指南</a> ·
+  <a href="deploy/DEPLOY.md">生产部署</a> ·
+  <a href="https://apehub.finecv.cn/admin">底座演示</a>
 </p>
 
 <p align="center">
@@ -17,455 +19,320 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-2.11.0-blue" alt="version">
   <img src="https://img.shields.io/badge/python-3.11%2B-orange" alt="python">
   <img src="https://img.shields.io/badge/vue-3.5-brightgreen" alt="vue">
+  <img src="https://img.shields.io/badge/MCP-ready-blue" alt="mcp">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="license">
-  <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey" alt="platform">
 </p>
 
 ---
 
-> **本项目由 AI 驱动开发，人工负责产品与质量。** 人类开发者负责产品方向、架构评审、质量验证与最终决策，AI 负责加速实现、测试和文档。
+> **当前状态**：P0 记忆层、P1 LLM Wiki、P1.5 公开库晋升、P2 联网与深度调研、P3 渲染通道/贡献榜/打包验证均已交付；下一阶段聚焦记忆治理、公开库运营与混合检索。
 
----
+**它不是又一个文档管理系统。**
 
-ApeAdmin 是为 AI 应用时代打造的后台开发框架：基于 FastAPI + Vue3 构建平台化管理底座，原生适配 AI Agent 能力调用。
-
-框架的核心理念是**底座与业务解耦**——底座只提供权限、菜单、日志、MCP 网关等基础设施，业务功能全部以插件形式独立开发、独立分发；同时通过 MCP-SSE 网关把管理能力封装为标准化 AI 工具，实现传统业务系统与大模型智能体的无缝打通。本仓库在底座之外内置 [AI 知识库插件](#ai-知识库插件knowledge_base)（本项目的核心开发目标，详见 [docs/knowledge-base](docs/knowledge-base/)）。
+它是一个会记忆、会整理、会协作、会自我修正的 AI 知识库：聊天时自动沉淀你的偏好与事实；资料丢进来自动编译成互相链接的 Wiki 词条；私人知识可以像提交 Pull Request 一样晋升为团队公共知识；需要时还能让 AI 联网检索论文，写成带引用的调研草稿。
 
 ## 目录
 
-- [功能特性](#功能特性)
-- [技术栈](#技术栈)
+- [为什么需要它](#为什么需要它)
+- [三分钟看懂](#三分钟看懂)
+- [核心能力](#核心能力)
+- [页面与工具](#页面与工具)
+- [工程纪律](#工程纪律)
 - [快速开始](#快速开始)
-- [架构](#架构)
-- [插件开发](#插件开发)
-- [配置说明](#配置说明)
-- [系统截图](#系统截图)
-- [贡献指南](#贡献指南)
+- [现状与路线图](#现状与路线图)
+- [最终愿景](#最终愿景)
+- [ApeAdmin 底座](#apeadmin-底座)
+- [文档与调研](#文档与调研)
 - [更新历史](#更新历史)
+- [贡献与社区](#贡献与社区)
 
-## 功能特性
+## 为什么需要它
 
-### 安装向导
+三个每天都在发生的浪费：
 
-WordPress 式开箱体验，无需手工编辑配置文件：
+| 浪费 | 现状 | 插件给出的答案 |
+|---|---|---|
+| 聊过就忘 | 每次开新会话都要重新交代背景、偏好、项目约束 | 对话结束自动提取记忆，形成持续更新的个人画像 |
+| 资料越多越乱 | 文档散落在网盘、聊天记录、收藏夹，找不回也用不上 | 原始资料编译成结构化 Wiki 词条，双链、来源、版本俱全 |
+| 个人知识出不了门 | 一个人的踩坑经验，团队其他人再踩一遍 | 私库词条经审核晋升公开库，署名可追溯、贡献可度量 |
 
-- **自动检测** —— 首次访问自动跳转 `/setup`；已完成安装的系统直接进入后台
-- **三步安装** —— 配置数据库 → 配置站点与管理员账号 → 完成
-- **自动建库** —— MySQL 数据库不存在时自动创建（utf8mb4）
-- **密钥自动生成** —— `JWT_SECRET` 随机生成写入 `.env`
-- **安装锁保护** —— `setup.lock` 防止向导被重复执行；安装阶段只建表不跑种子，种子在重启后以新密钥执行，避免加密密钥不一致
+一句话：**把「信息」变成「可复用的知识」，再把「个人知识」变成「组织能力」。**
 
-### RBAC 权限体系
+> 和传统知识库的区别：传统 KB 存「文档 + 向量」，检索返回的是碎片；这里存「词条 + 关系 + 来源」，返回的是可读、可审、可演进的知识。
 
-- **五表模型** —— 用户 / 角色 / 菜单 / 部门 + 关联表
-- **四层鉴权** —— 免登录 → 免鉴权 → 规则鉴权 → 数据范围（1=本人 / 2=本部门及以下 / 3=本部门 / 4=全部；数据范围过滤已在用户列表落地，其余资源陆续接入）
-- **菜单三类型** —— 目录(M) / 菜单(C) / 按钮(F)，无限层级树形结构
-- **超管通配** —— 超级管理员自动拥有所有权限
-- **前端权限** —— `v-permission` 指令控制按钮级显示，路由守卫校验页面级权限
+## 三分钟看懂
 
-### 插件化架构
+```
+【沉淀】
+聊天 → AI 助手 → 完成事件 → 记忆提取 → 记忆库 / 用户画像
+                                      └→ kb_query 注入下一次对话
 
-- **自动发现** —— 插件以 Python 包形式放在 `src/plugins/builtin/`，启动时自动扫描加载
-- **ZIP 导入安装** —— 后台「插件管理 → 导入插件」上传 ZIP 即完成安装，运行时生效，无需重启
-- **原地升级与回滚** —— 上传新版包自动换码、重注册、保配置，失败自动恢复旧版文件；旧版保留在 `src/plugins/_backups/`（最近 2 份）可手工回滚
-- **降级保护** —— 低于当前版本的插件包默认拒绝安装
-- **事件总线** —— 7 种内置事件，插件间松耦合通信
-- **菜单与 MCP 能力注册** —— 插件自带 `seed.py` 注册菜单权限，可同时注册 MCP 工具暴露给 AI
-- **脚手架生成** —— `python -m src.plugins.scaffold my_plugin "显示名" "描述"` 一条命令生成完整插件骨架（含 manifest / 模型 / 路由 / 菜单种子 / MCP 工具示例）
-- **插件市场** —— 在线浏览、搜索、下载社区插件
+【编译】
+资料 / 网页 / 论文 → 原始层（不可变，哈希校验）→ LLM Wiki 编译
+                                      ├→ 词条：candidate → draft → live
+                                      └→ 引用 / References / 双链
 
-### MCP-SSE 网关
+【流动】
+私库词条 → 晋升（冻结快照 → 审核）→ 公开知识库
+公开知识库 + 私库 → 双通道召回 → MCP → 任意 Agent
+```
 
-将底座与插件的管理能力对外暴露为 AI Agent 可调用的工具：
+三条主线，一个闭环：
 
-- **三原语** —— Tools（工具调用）/ Resources（资源读取）/ Prompts（模板渲染）
-- **双传输通道** —— Streamable HTTP（`POST /mcp`，2025-03-26 规范，Bearer JWT + 会话头）+ SSE（旧通道，一次性 ticket 认证，保留兼容）
-- **自动 Schema** —— 工具注册时自动从函数签名推断 JSON Schema
-- **RBAC 过滤** —— AI Agent 只能看到当前用户有权限调用的工具
-- **安全传输** —— JWT 走 Authorization 头；SSE 用一次性 ticket 替代裸 JWT；工具调用 30s 超时保护
-- **持久化恢复** —— 服务重启后自动恢复 MCP 工具注册
-- **审计日志** —— 每次调用记录请求、响应、耗时、调用者
-- **共享分发层** —— 两种通道共用同一套 JSON-RPC 分发器，鉴权/审计/超时行为完全一致
+1. **沉淀**：聊天 → 记忆 → 画像 → 下次对话更懂你
+2. **编译**：资料 → 词条 → 双链 Wiki → 可追溯的知识资产
+3. **流动**：私库 → 晋升审核 → 公开库 → 团队与所有 Agent 共享
 
-内置 MCP 工具：
+## 核心能力
 
-| 工具 | 说明 |
-|------|------|
-| `system_health_check` | 系统健康检查 |
-| `system_list_plugins` | 列出已安装插件 |
-| `role_list / create / update / delete` | 角色管理（需权限） |
-| `dept_list / create / update / delete` | 部门管理（需权限） |
-| `menu_list / create / update / delete` | 菜单管理（需权限） |
+### 1. 记忆沉淀：AI 越聊越懂你
 
-### AI 全能助手
+每轮对话完成后，插件在后台做一次「值得记住吗」的判断，不需要用户手动收藏：
 
-- **多模型支持** —— DeepSeek / 通义千问 / 智谱 GLM / OpenAI / 自定义端点（OpenAI 兼容接口）
-- **后台 run 架构** —— 生成任务在服务端后台执行，切页面、断线、重启浏览器都不中断；前端断线自动重连续传，多次失败降级为一次性查询
-- **流式输出** —— SSE 流式 + Markdown 实时渲染 + 代码高亮
-- **Function Calling** —— AI 可调用 MCP 工具完成管理操作（多轮工具循环）
-- **密钥管理** —— 后台管理供应商密钥，Fernet 加密存储
-- **失败引导** —— 生成失败按错误类型弹窗引导（未配密钥/网络代理异常 → 一键跳转模型配置）
+- **单次 LLM、ADD-only 提取**：只新增，不让模型直接改写历史记忆，避免记忆被模型越改越乱
+- **MD5 双重去重**：批内去重 + 库内去重；同一事实再次出现时证据 +1、置信度上调，而不是重复入库
+- **四类记忆**：事实（fact）/ 偏好（preference）/ 习惯（habit）/ 事件（event）
+- **画像整体重写**：每积累一批新记忆，LLM 全量重写用户画像（Markdown、带版本号），避免碎片越堆越散
+- **双时序设计**：数据层预留 `valid_at / invalid_at / expired_at`，为「旧事实软失效、不物理删除」的时效演化留出空间
+- **全程异步、失败静默**：提取任务不阻塞聊天；模型不可用、JSON 解析失败都只记日志
 
-### AI 知识库插件（knowledge_base）
+用户可在「记忆画像」页查看画像、按类型筛选记忆、查看置信度与证据次数、删除任意一条记忆。**记忆仅本人可见，管理员也看不到别人的记忆。**
 
-随本仓库发布的内置插件——把聊天沉淀、LLM Wiki 编译、公开库协作与联网调研串成一条知识生产流水线：
+### 2. LLM Wiki：把资料编译成会生长的词条
 
-- **聊天记忆自动沉淀**（P0）—— 每轮对话完成后后台提取值得长期记住的事实/偏好/习惯/事件（单次 LLM ADD-only 提取，MD5 去重；重复出现自动强化置信度，不做 LLM 更新决策）
-- **双时序记忆模型**（P0）—— 事实有效轴（valid_at / invalid_at）＋系统事务轴，旧偏好不删除只打标失效，画像随时间演化全程可审计
-- **记忆画像页**（P0）—— 档案式布局：身份条＋画像卡片＋记忆时间线（置信度进度条、证据计数、类型筛选）
-- **MCP 工具由 AI 主动存取**（P0）—— ``kb_save`` / ``kb_query`` 等 8 个工具；``user`` 参数由运行时注入（不出现在 JSON Schema，模型不可见不可伪造，行级隔离）
-- **隐私合规** —— 记忆仅本人可见可删；沉淀全程异步后台任务，绝不阻塞聊天
-- **宿主新增 ``chat_message_complete`` 事件** —— 插件监听聊天完成钩子做后处理（零侵入插件范式）
-- **LLM Wiki 词条编译**（P1）—— 文档/调研入源 → Jaccard 去重预筛 → Map 提取 → Reduce 合并（70% 缩水保护）→ STORM 引用整合（``[n]`` 重排＋References）→ 双链 linkify，产出可追溯词条
-- **私有空间＋公开库**（P1）—— 空间级 ``visibility``；私库词条经 PR 式晋升流（冻结快照 → 审核 → 批准发布独立副本，溯源三连保留原作者）进入公开库；门槛 source_count ≥ 3、confidence ≥ 0.8
-- **AI 双通道召回**（P1）—— 私库按 ``user_id`` 在 SQL 层硬过滤（防泄漏）＋公开库 live-only，统一合并返回；公开库贡献榜按原作者聚合
-- **联网采集与三层开关**（P2）—— httpx＋trafilatura 纯函数抽取（SSRF 私网拦截／域名白名单／robots／大小类型护栏），可选 crawl4ai 渲染通道优雅降级；联网默认关，开启需显式确认数据外发
-- **学术检索与深度调研**（P2）—— arXiv / OpenAlex / Semantic Scholar 三源（各自礼貌节流）；STORM 裁剪版调研：大纲 → 逐节检索 → 带引用成文（LLM 调用数与 token 双熔断），产出落草稿待审
-- **任务中枢与六页面**（P1/P2）—— per-user 后台任务（孤儿恢复／失败重试）；记忆画像／知识空间／词条编辑／晋升审核＋贡献榜／任务中心／插件设置
+不是把文档切片塞进向量库，而是像人写百科一样，把资料「编译」成结构化词条：
 
-> 规划与选型依据见 [docs/knowledge-base](docs/knowledge-base/)：插件开发规划 ＋ 24 个开源对标仓库的代码精读调研笔记（WeKnora / mem0 / STORM / SwarmVault / EverOS 等）。P0（聊天记忆）／P1（LLM Wiki 编译＋公开库）／P2（联网采集＋深度调研）／P3（渲染通道＋贡献榜＋打包）均已落地。
+- **原始层不可变**：文档入库即定稿，`blake2b` 内容哈希用于幂等与后续增量判定
+- **Map 提取**：一篇资料 → 最多 8 个词条（slug / 标题 / 正文 / 支撑原文片段）
+- **确定性预筛先行**：同 slug 直接命中、Jaccard 相似度超过阈值直接跳过——**能不算 LLM 的绝不算**，只有存疑项才进入合并
+- **Reduce 合并三重保护**：
+  - 合并后长度低于原文 70% → 判定疑似截断，拒绝写入
+  - slug / 标题等锁定字段强制回写，不允许模型改名
+  - 每次合并产生新修订，旧版本完整保留
+- **引用与双链**：正文 `[n]` 引用整合 + References 节 + `[[wikilink]]` 双链自动回填 in/out links
+- **词条三态**：`candidate`（候选）→ `draft`（草稿）→ `live`（已发布）；候选需满足来源数与置信度门槛才值得晋升
+- **人工编辑优先**：机器快照最多保留 50 份、硬顶 200 份；人工修订永不参与自动裁剪，后续编译不会冲掉你的改动
 
-### 审计日志
+单篇资料编译的成本被压到约 1 次 LLM 调用；合并只在真正需要时发生。
 
-- **请求链路追踪** —— 全局唯一请求 ID
-- **操作日志** —— 用户操作行为，按模块 / 时间 / 用户筛选
-- **请求耗时监控** —— 自动记录 API 耗时
+### 3. 公开库晋升：知识库的 Pull Request
 
-### 其他底座能力
+个人知识不该锁死在个人空间里。插件把 GitHub 的 PR 心智搬进了知识库：
 
-- **双语 i18n** —— 前后端中英双语（`zh-CN` / `en-US`）
-- **深色模式** —— 全局主题切换
-- **系统自更新** —— 后台上传部署包原地更新，更新前全量备份、已安装插件自动还原
-- **测试覆盖** —— 插件热插拔 / 插件升级 / 系统 UPDATE 接口 / 菜单管理 / chat run / 加固项等 43 个用例
-- **Redis 可选加速** —— 登录爆破防护 / MCP ticket / token 吊销缓存可走 Redis（多 worker 必需），不可用时自动降级进程内存
+- **双轨空间**：`private` 私库（本人读写）与 `public` 公开库（全员只读、AI 可召回）
+- **提交即冻结**：提交晋升时保存内容快照；审核期间你继续编辑私库，不影响这次审核对象
+- **审核后生成独立副本**：批准 → 公开库生成新页（先落 draft，再由维护者发布 live），并保留 `origin_space / origin_page / origin_author` 溯源三连
+- **写权限硬校验**：公开库不接受绕过晋升流的直接写入；API 层直接 403，不靠前端隐藏按钮
+- **贡献可度量**：公开库贡献榜按原作者聚合已发布的晋升词条，谁贡献了多少一目了然
+- **私库原件不动**：晋升是「复制 + 署名」，不是「搬家」；删除私库原页不影响公开副本
 
-## 技术栈
+### 4. 联网采集与学术检索：给 AI 一个可信的外部大脑
 
-| 层 | 技术 |
+联网默认是**关**的。开启它需要一次明确的确认——因为开启意味着数据外发。
+
+- **三层开关**：用户级总开关（默认关）→ 开启时二次确认 → 工具调用时再校验；关闭状态下网页抓取直接拒绝
+- **采集护栏**：SSRF 私网/保留地址拦截、域名白名单、robots.txt 检查、响应 5MB 上限、content-type 白名单、20s 超时
+- **正文抽取**：`httpx`（禁用环境代理，兼容本地代理）拉页 → `trafilatura` 纯函数抽正文 Markdown；JS 渲染站点明确提示「需要渲染引擎」，不静默失败；可选 `crawl4ai` extras 提供渲染通道
+- **学术三源**：
+  - arXiv：全局单例客户端，遵守官方 3s 限速，只取元数据与摘要
+  - OpenAlex：礼貌池 + 重试 3 次，跨库 DOI / 引用数 / 开放获取信息
+  - Semantic Scholar：进程级共享节流（≥1s）+ 429 退避重试 + 连接复用
+- **最小化外发**：学术源只取元数据与摘要，不下载 PDF 全文，不携带用户凭据
+
+### 5. 深度调研：从问题到带引用的草稿
+
+给它一个题目，它自己规划、自己找资料、自己写：
+
+1. **大纲**：1 次 LLM 生成 3~5 个小节，每节带检索关键词
+2. **逐节采集**：并行检索学术三源，每节最多 8 条来源
+3. **逐节成文**：每节 1 次 LLM，基于检索结果写作并要求 `[n]` 引用
+4. **拼装报告**：统一编号、去重来源、生成 References
+5. **落草稿**：产出 `draft` 词条 + 原始资料存档，**人工确认后才发布**
+
+成本护栏写在代码里：单次调研 LLM 调用 ≤ 15 次、token 预算上限、每节来源数上限。超限即熔断，不会「越查越贵」。
+
+### 6. 双通道召回：一次查询，三类知识
+
+`kb_query` 一次返回：
+
+- **个人画像摘要**（你是谁、偏好什么）
+- **你的记忆条目**（事实 / 偏好 / 习惯 / 事件）
+- **私有 Wiki 词条**（你自己的全部状态词条）
+- **公开 Wiki 词条**（公开库仅召回 `live` 内容）
+
+防泄漏不是靠 `if` 判断：私有内容的召回路径在 SQL 层就不存在（`user_id` 硬过滤），公开通道只查 `visibility='public'` 且 `status='live'` 的词条。
+
+## 页面与工具
+
+### 六个页面
+
+| 页面 | 你在这里做什么 |
 |---|---|
-| 后端 | FastAPI + SQLAlchemy 2.0 (async) + Alembic |
-| 前端 | Vue 3.5 + Vite 6 + TypeScript 5.7 + Element Plus 2.14 |
-| 状态管理 | Pinia 2.3 |
-| 图表 | ECharts 5.6 + vue-echarts |
-| 数据库 | MySQL（aiomysql）/ SQLite（aiosqlite）双驱动自动切换 |
-| 缓存 | Redis（可选，缺失自动降级内存） |
-| 认证 | JWT（access token）+ bcrypt 密码哈希；token 吊销走 DB 黑名单 + Redis 加速 |
-| AI 协议 | MCP (Model Context Protocol) — Streamable HTTP + SSE 双传输 |
-| AI 模型 | DeepSeek / 通义千问 / 智谱 GLM / OpenAI（OpenAI 兼容接口） |
+| 知识空间 | 建私有空间、上传资料、浏览公开库 |
+| 词条管理 | 三态筛选、Markdown 阅读、编辑（乐观锁）、版本历史、发布 / 归档、发起晋升 |
+| 晋升审核 | 待审队列、快照预览、通过 / 拒绝、我的申请、公开库贡献榜 |
+| 任务中心 | 编译 / 调研任务进度、LLM 调用计数、失败重试、自动刷新 |
+| 记忆画像 | 画像渲染、记忆时间线、类型筛选、置信度与证据、单条删除、手动重写 |
+| 插件设置 | 联网总开关（二次确认）、域名白名单、学术源状态 |
+
+### 八个 MCP 工具
+
+| 工具 | 作用 | 关键约束 |
+|---|---|---|
+| `kb_save` | 保存一条用户知识 | 自动去重，重复即强化 |
+| `kb_query` | 画像 + 记忆 + 私有词条 + 公开词条一次召回 | `user` 运行时注入，模型不可见 |
+| `kb_ingest` | 把资料提交进空间并触发编译 | 仅空间 owner |
+| `kb_compile` | 手动触发空间编译 | 返回 job_id 轮询 |
+| `kb_collect_web` | 抓取网页正文 | 需联网开关 + 白名单 + SSRF 校验 |
+| `kb_collect_arxiv` | arXiv 论文元数据 | 官方限速 |
+| `kb_collect_openalex` | OpenAlex 跨库文献 | 礼貌池 + 重试 |
+| `kb_research` | 发起深度调研 | 成本熔断，产出草稿待确认 |
+
+这些工具注册后即对 AI 助手可见，聊天中零配置可调；同时受 RBAC 过滤，Agent 只能看到当前用户有权限的工具。
+
+## 工程纪律
+
+这部分是这个插件最「不像 demo」的地方：
+
+- **行级隔离是硬约束**：所有业务表强制 `user_id`；MCP 的 `user` 参数由宿主运行时注入，不出现在 JSON Schema，模型无法伪造
+- **成本纪律**：确定性规则（哈希 / 相似度 / 长度保护）永远跑在 LLM 前面；每个任务有调用次数与预算上限
+- **失败不扩散**：记忆提取、编译、调研全部在后台任务里执行，任何异常只落 job 状态，不影响聊天与页面
+- **SQLite 单写者**：每用户串行 worker，不引入并发写；重启后孤儿任务自动标失败、可重试
+- **宿主侵入面极小**：仅两处——聊天完成事件发射、MCP 保留参数注入；其余全部走官方插件通道
+- **依赖白名单**：核心只依赖 `httpx` / `trafilatura`；学术源用 `arxiv` / `pyalex`；渲染通道是可选 extras（`crawl4ai`）；不引入 LangChain、向量库、torch 等重依赖
+- **测试覆盖关键路径**：30+ 用例，覆盖去重强化、行级隔离、双通道防泄漏、快照冻结、合并缩水保护、联网默认关、SSRF 拦截、贡献榜聚合等
 
 ## 快速开始
 
-### 在线体验
-
-无需搭建，直接访问线上演示环境：
-
-- **地址**：<https://apehub.finecv.cn/admin>
-- **测试账号**：`ceshi110` / `ceshi110`（只读 viewer 角色）
-
-### 方式一：安装向导（推荐）
-
 ```bash
-# 1. 启动后端
+# 1. 后端
 cd backend
-python -m venv .venv && .venv/bin/activate    # Windows: .venv\Scripts\activate
+python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e .
-uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
+uvicorn src.main:app --reload --port 8000
 
-# 2. 启动前端（开发模式）
-cd frontend
+# 2. 前端
+cd ../frontend
 npm install
 npm run dev
 ```
 
-打开 `http://localhost:5173`，系统检测到未安装会自动进入 `/setup` 向导：
+访问 `http://localhost:5173` → 完成安装向导 → 在「插件管理」确认启用 **AI 知识库**（首次启用自动建表并注册菜单）→ 在「AI 助手」配置模型密钥。
 
-1. **配置数据库** —— SQLite（零配置）或 MySQL（填连接信息，可自动建库）
-2. **配置站点** —— 站点名称、管理员账号密码、访问地址
-3. **完成安装** —— 写入配置并建表，按提示重启后端，重启后自动初始化管理员与基础数据
+**建议的体验路径**：
 
-### 方式二：生产部署（部署包）
+1. 和 AI 助手聊 5~10 轮，交代你的职业、技术栈、偏好
+2. 打开「记忆画像」，看它记住了什么；手动重写一次画像
+3. 在「知识空间」上传两三篇文档，等编译完成，去「词条管理」看生成的词条与来源
+4. 把满意的词条「发起晋升」，用管理员账号在「晋升审核」通过
+5. 让 AI 发起一次调研：「调研 RAG 与长上下文的取舍」，去「任务中心」看进度，去「词条管理」看草稿
 
-服务器（宝塔面板 / Docker / 裸机 Nginx）部署方案、部署包构建、SQLite→MySQL 迁移，见 **[deploy/DEPLOY.md](deploy/DEPLOY.md)**。
+> 默认 SQLite 零配置；生产可切 MySQL。需要 JS 渲染站点时安装可选依赖 `pip install -e ".[knowledge-render]"`。部署包与 Nginx 方案见 [deploy/DEPLOY.md](deploy/DEPLOY.md)。
 
-```bash
-# 本地构建部署包（底座版，不含业务插件）
-bash deploy/build_deploy_package.sh
-# 完整版（连带 apehub_web 官网插件）
-bash deploy/build_deploy_package.sh --with-apehub
-```
+## 现状与路线图
 
-部署包只含底座（RBAC / 菜单 / 插件框架 / MCP 网关），解压即 `apeadmin/`，首次启动进入安装向导；业务插件通过后台「导入插件」按需安装（上传 ZIP / 插件市场在线安装）。
+| 阶段 | 范围 | 状态 |
+|---|---|---|
+| **P0 记忆层** | 记忆提取 / 去重强化 / 画像 / 记忆画像页 / `kb_save`·`kb_query` | 已交付 |
+| **P1 LLM Wiki** | 空间 / 原始层 / 编译管线 / 词条三态 / 修订 / 双链 / 引用 / 任务中心 | 已交付 |
+| **P1.5 公开库** | 可见性 / PR 式晋升 / 快照冻结 / 溯源三连 / 贡献榜 / 双通道召回 | 已交付 |
+| **P2 联网与调研** | 三层开关 / 采集护栏 / 学术三源 / 深度调研 / 设置页 | 已交付 |
+| **P3 打磨** | crawl4ai 渲染通道 / 贡献榜 UI / 插件 ZIP 打包验证 / 插件版本 0.2.0 | 已交付 |
+| **下一步** | 记忆治理（沉淀开关 / 遗忘 / 导出）、公开库运营（空间管理 / 订阅通知）、FTS5 混合检索、shared 空间 ACL | 规划中 |
+| **愿景** | 公开库 MCP 出口、知识图谱、多模态、知识市场与贡献激励 | 长期 |
 
-### 默认体验路径
+## 最终愿景
 
-1. 登录后台（安装向导中设置的管理员账号）
-2. 系统管理 → 用户 / 角色 / 菜单 / 部门 / 插件管理
-3. MCP 管理 → 工具 / 资源 / 提示词 / 调用日志
-4. AI 助手 → 配置模型密钥后即可对话
+### 北极星
 
-## 架构
+> **让组织里每一次思考，都不再流失。**
 
-ApeAdmin 是前后端分离的单体应用，后端插件化扩展，内置安装向导：
+今天我们记录的是文档，流失的是判断、取舍、踩过的坑，以及「为什么这么选」。
+这个插件想做的，是把这些隐性知识变成可检索、可引用、可复用、可演进的资产。
 
-```
-apeadmin/
-├── backend/                       # FastAPI 后端
-│   ├── src/
-│   │   ├── api/                   # 路由层（REST，前缀 /api/v1）
-│   │   │   ├── auth.py            #   认证（登录/登出/刷新令牌）
-│   │   │   ├── user.py / role.py / menu.py / dept.py   # RBAC 四表
-│   │   │   ├── plugin.py          #   插件管理（上传/启停/升级/回滚）
-│   │   │   ├── ai_provider.py     #   AI 模型密钥管理
-│   │   │   ├── chat.py / chat_session.py / chat_runs.py  # AI 对话（run 架构）
-│   │   │   ├── dashboard.py / log.py / files.py / setting.py / system.py
-│   │   ├── core/                  # 基础设施
-│   │   │   ├── config.py          #   pydantic-settings 配置
-│   │   │   ├── security.py        #   密码哈希 + JWT 签发校验
-│   │   │   ├── deps.py            #   FastAPI 依赖注入
-│   │   │   ├── middleware.py      #   CORS / 请求追踪
-│   │   │   ├── exceptions.py      #   统一异常体系
-│   │   │   ├── i18n.py            #   后端双语文案
-│   │   │   ├── crypto.py          #   API Key Fernet 加密
-│   │   │   ├── auth_guard.py      #   登录爆破防护
-│   │   │   ├── pkgdetect.py       #   上传包类型识别（插件/系统更新/Go 包）
-│   │   │   └── seed.py            #   种子数据
-│   │   ├── ai/                    # AI 智能体
-│   │   │   ├── agent.py           #   多模型对话 + 工具调用循环
-│   │   │   ├── runner.py          #   后台 run 执行器（状态机 + 断点续传）
-│   │   │   └── tools.py           #   MCP 工具列表构建
-│   │   ├── mcp/                   # MCP 协议体系
-│   │   │   ├── manager.py         #   工具/资源/提示词管理 + RBAC 过滤
-│   │   │   ├── routes.py          #   MCP HTTP 路由 + 审计
-│   │   │   ├── sse_transport.py   #   SSE 传输
-│   │   │   └── decorators.py      #   @mcp_tool 装饰器
-│   │   ├── plugins/               # 插件系统
-│   │   │   ├── base.py            #   PluginInterface + EventBus
-│   │   │   ├── manager.py         #   发现/加载/ZIP安装/升级/回滚
-│   │   │   ├── scaffold/          #   插件脚手架（生成骨架）
-│   │   │   └── builtin/           #   内置插件（目录动态扫描）
-│   │   │       └── dev_example/   #     插件开发示例（唯一随包分发的示例）
-│   │   ├── models/ crud/ schemas/ # ORM 模型 / 泛型 CRUD / Pydantic 模型
-│   │   ├── setup_wizard/         # 安装向导（未安装时挂载 /setup）
-│   │   ├── cli.py                 # 命令行工具（serve/init-db/seed/plugins）
-│   │   └── main.py                # 应用入口（lifespan + setup 模式切换）
-│   ├── alembic/                   # 数据库迁移
-│   ├── tests/                     # 43 个测试用例（插件/AI run/更新/加固）
-│   └── pyproject.toml
-│
-├── frontend/                      # Vue3 前端
-│   ├── src/
-│   │   ├── api/                   # Axios 封装 + 接口定义
-│   │   ├── components/            # ApeHeader / ApeSidebar / 版本更新弹窗
-│   │   ├── composables/           # useTheme（深浅切换）
-│   │   ├── directives/            # v-permission 权限指令
-│   │   ├── router/                # 动态路由（菜单树 → 路由，import.meta.glob）
-│   │   ├── stores/                # Pinia（用户/权限/菜单/AI 对话状态）
-│   │   ├── locales/               # 中英双语（zh-CN / en-US）
-│   │   └── views/                 # 页面：system / mcp / ai / login / error / dev_example
-│   └── package.json
-│
-└── deploy/                        # 部署物料
-    ├── DEPLOY.md                  # 生产部署文档
-    ├── build_deploy_package.sh    # 部署包构建（底座版/完整版）
-    ├── nginx/                     # Nginx 站点配置模板
-    └── scripts/                   # 服务器部署/管理/备份脚本
-```
+### 三步走
 
-### 设计原则
+**1.0 个人第二大脑（今天）**
+聊天即沉淀，资料即词条，问题即调研。每个人先拥有一个越用越懂自己的知识库。
 
-1. **底座与插件解耦** —— 底座只提供基础设施 + `dev_example` 教学示例；业务插件（官网门户、AI 助手类等）以独立插件包分发，不进底座仓库与安装包
-2. **安装即用** —— 未安装自动进 `/setup`；SQLite 零配置起步，MySQL 生产切换
-3. **权限贯穿 AI** —— MCP 工具与 AI Function Calling 均受 RBAC 控制，AI 只能操作用户有权限的资源
-4. **动态路由** —— 前端路由由后端菜单树生成，菜单增减无需改前端代码
-5. **可恢复设计** —— 插件升级失败自动回滚；系统更新前全量备份；AI 生成断线可续
+**2.0 团队知识飞轮（下一步）**
+私库 → 晋升 → 公开库 → 被更多人和 Agent 使用 → 贡献被看见 → 更多人愿意贡献。
+当「写知识」能带来署名与复用，知识库才会真正长起来，而不是上线三个月后变成归档站。
 
-## 插件开发
+**3.0 组织知识互联网（终局）**
+每个团队、每个组织都有自己的知识节点；节点之间通过 MCP 与标准化引用协议互联。
+知识像开源软件一样流动：可 fork、可提交、可审核、可署名、可度量、可追溯。
 
-### 创建插件（脚手架，推荐）
+### 终局画面
 
-```bash
-cd backend
-python -m src.plugins.scaffold my_plugin "我的插件" "插件描述"
-# 生成 src/plugins/builtin/my_plugin/：
-#   plugin.json / plugin.py / models.py / api.py / seed.py / mcp_tools.py
-```
+- **新同事入职第一天**，AI 已经知道团队过去三年的技术选型、踩坑记录和决策理由，不用再问「为什么当年不用 X」
+- **每一次会议、代码评审、客服对话**都会自动沉淀；Wiki 自己合并、去重、补链、标记过期，人只负责批准
+- **IDE、IM、客服机器人、手表、车载助手**通过同一个 MCP 接口接入同一个知识大脑，换 Agent 不换记忆
+- **每条结论都能一键回溯**到原文、作者、时间与变更历史；引用可验证，幻觉无处藏身
+- **公开库成为组织的知识资产表**：谁贡献了什么、被谁引用了多少次、哪些知识正在失效，全部可视化
+- **知识可以协作与流通**：优质词条像开源项目一样被引用、派生、维护，贡献者获得署名与回报
 
-### 手工创建
+### 三条底线
 
-在 `backend/src/plugins/builtin/` 下创建 Python 包：
+1. **可信优先于聪明**：没有来源的结论不进 Wiki；每条知识可追溯到原文与作者
+2. **私有优先于便利**：默认不联网、不外发、不越权；记忆与画像只属于本人
+3. **开放优先于锁定**：知识以 Markdown 与开放表结构保存，通过 MCP 可被任意 Agent 读取，不被专有格式锁死
 
-```
-my_plugin/
-  __init__.py
-  plugin.json       # 清单（name/version/dependencies）
-  plugin.py         # 入口（实现 PluginInterface）
-  models.py         # ORM 模型（可选）
-  api.py            # 路由（可选）
-  seed.py           # 菜单/权限注册（可选）
-  mcp_tools.py      # MCP 工具（可选）
-```
+> 我们不是在做一个更好的文档库。
+> 我们是在给 AI 时代造一个**会记忆、会整理、会协作、会自我修正的知识大脑**。
 
-### 插件接口
+## ApeAdmin 底座
 
-```python
-from src.plugins.base import PluginInterface, PluginInfo
+知识库不是凭空长出来的，它需要一套可靠的底座。本仓库同时包含 [ApeAdmin](https://github.com/KevinLiss/ApeAdmin) 的 FastAPI + Vue3 底座，**但底座只做支撑，主角是插件**：
 
-class MyPlugin(PluginInterface):
-    @property
-    def info(self) -> PluginInfo:
-        return PluginInfo(name="my-plugin", version="1.0.0", ...)
+- **插件系统**：自动发现、ZIP 安装、热升级与失败回滚、插件 MetaData 隔离
+- **RBAC**：菜单 M/C/F 三类型 + 权限点 + `v-permission` + MCP 工具权限过滤
+- **MCP 网关**：Streamable HTTP + SSE 双传输，Schema 自动推断，调用审计，30s 超时
+- **AI 助手**：多模型、后台 run（断线不中断）、SSE 流式、Function Calling
+- **零配置起步**：安装向导 + SQLite；生产可切 MySQL / Redis / Nginx
 
-    def on_load(self): ...            # 加载时调用
-    async def install(self): ...      # 安装（可建表）
-    async def uninstall(self): ...    # 卸载
-    def register(self, app): ...       # 注册 FastAPI 路由
-    def register_mcp_tools(self): ... # 注册 MCP 工具（暴露给 AI）
-    def unregister(self, app): ...    # 反注册
-    async def before_login(self, payload): ...  # 登录前钩子
-```
+| 层 | 技术 |
+|---|---|
+| 后端 | FastAPI + SQLAlchemy 2.0 (async) |
+| 前端 | Vue 3.5 + Vite 6 + TypeScript + Element Plus |
+| 数据库 | SQLite（默认）/ MySQL |
+| AI 协议 | MCP（Streamable HTTP + SSE） |
+| 模型 | DeepSeek / 通义千问 / 智谱 GLM / OpenAI / 兼容端点 |
 
-> 完整示例参考 `backend/src/plugins/builtin/dev_example/`（含模型、路由、菜单注册、事件订阅、MCP 工具五件套）与 [docs/plugin-mcp-guide.md](docs/plugin-mcp-guide.md)。
+底座能力与插件开发规范见 [docs/plugin-mcp-guide.md](docs/plugin-mcp-guide.md)。一句话：**底座是土壤，插件才是长出来的东西。**
 
-### 事件类型
+## 文档与调研
 
-| 事件 | 触发时机 |
-|------|----------|
-| `APP_STARTUP` / `APP_SHUTDOWN` | 应用启停 |
-| `DB_READY` | 数据库初始化完成 |
-| `USER_LOGIN` / `USER_LOGOUT` | 用户登录登出 |
-| `BEFORE_REQUEST` / `AFTER_REQUEST` | 请求处理前后 |
+- [插件开发规划](docs/knowledge-base/插件开发规划.md)：需求映射、数据模型、MCP 工具面、分期与验收标准
+- [24 仓代码精读调研笔记](docs/knowledge-base/调研笔记-开源对标代码精读.md)：WeKnora / mem0 / STORM / SwarmVault / EverOS / PandaWiki / MaxKB / graphiti / trafilatura / arxiv.py / pyalex 等
+- [插件与 MCP 开发指南](docs/plugin-mcp-guide.md)
+- [生产部署](deploy/DEPLOY.md)
 
-### 分发插件
-
-1. 把插件目录打成 ZIP（含 `plugin.json`）；
-2. 后台「插件管理 → 导入插件」上传，运行时安装，无需重启；
-3. 可发布到插件市场供在线安装（`apehub.finecv.cn/apehub-web/plugins.html`）。
-
-> 前端页面需在主前端工程中构建（底座 `frontend_dist` 携带页面 chunk），插件 ZIP 负责后端逻辑与菜单注册。
-
-## 配置说明
-
-安装向导自动生成 `.env`；手工配置参考（后端目录 `.env` 或环境变量）：
-
-| 配置项 | 默认值 | 说明 |
-|--------|--------|------|
-| `DB_TYPE` | sqlite | 数据库类型 (sqlite / mysql) |
-| `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASSWORD` | localhost / 3306 / root / — | MySQL 连接 |
-| `DB_NAME` | apeadmin | 数据库名 |
-| `REDIS_URL` | redis://localhost:6379/1 | Redis（可选，缺失降级内存） |
-| `JWT_SECRET` | 安装时自动生成 | JWT 签名密钥 |
-| `JWT_EXPIRE_MINUTES` | 1440 | access token 有效期（分钟） |
-| `JWT_REFRESH_EXPIRE_DAYS` | 7 | refresh token 有效期（天） |
-| `CORS_ORIGINS` | localhost:5173,localhost:8000 | CORS 白名单 |
-| `ADMIN_PATH` | /admin | 管理后台访问路径 |
-| `SITE_URL` | — | 站点对外访问地址 |
-| `MCP_ENABLED` | true | 启用 MCP 网关 |
-| `PLUGINS_ENABLED` | true | 启用插件系统 |
-| `SUPER_ADMIN_USERNAME` / `SUPER_ADMIN_PASSWORD` | admin / admin123 | 超管种子账号（仅首次） |
-
-### AI 模型配置
-
-在管理后台 → AI 助手 → 模型密钥管理中添加：
-
-| 供应商 | 默认模型 | Base URL |
-|--------|----------|----------|
-| DeepSeek | deepseek-chat | `https://api.deepseek.com` |
-| 通义千问 | qwen-plus | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
-| 智谱 GLM | glm-4-flash | `https://open.bigmodel.cn/api/paas/v4` |
-| OpenAI | gpt-4o-mini | `https://api.openai.com/v1` |
-| 自定义 | — | 任意 OpenAI 兼容端点 |
-
-## 系统截图
-
-<table>
-  <tr>
-    <td width="50%" align="center">
-      <img src="assets/screenshots/login.png" alt="登录页" /><br/>
-      <sub><b>登录</b></sub>
-    </td>
-    <td width="50%" align="center">
-      <img src="assets/screenshots/dashboard.png" alt="仪表盘" /><br/>
-      <sub><b>仪表盘</b></sub>
-    </td>
-  </tr>
-  <tr>
-    <td width="50%" align="center">
-      <img src="assets/screenshots/plugins.png" alt="插件管理" /><br/>
-      <sub><b>插件管理</b></sub>
-    </td>
-    <td width="50%" align="center">
-      <img src="assets/screenshots/system.png" alt="系统管理" /><br/>
-      <sub><b>系统管理</b></sub>
-    </td>
-  </tr>
-</table>
-
-## 贡献指南
-
-### 如何贡献
-
-1. **Fork** 仓库
-2. 克隆你的 fork：
-   ```bash
-   git clone https://github.com/<你的用户名>/ApeAdmin.git
-   cd ApeAdmin
-   ```
-3. 创建分支：`git checkout -b feat/your-feature`
-4. 修改代码并验证：
-   ```bash
-   # 后端（含测试）
-   cd backend && pip install -e . && uvicorn src.main:app --reload
-   pytest tests/ -q
-
-   # 前端
-   cd frontend && npm install && npm run dev
-   ```
-5. 写清晰的 commit：`git commit -m "feat: add xxx support"`
-6. **Push** 并向 `master` 提交 **Pull Request**
-
-### 分支命名
-
-| 前缀 | 用途 |
-|------|------|
-| `feat/` | 新功能 |
-| `fix/` | Bug 修复 |
-| `refactor/` | 重构（不改变行为） |
-| `docs/` | 仅文档 |
-| `chore/` | 构建、CI、工具链 |
-
-### 约定
-
-- 插件保持独立，不直接依赖其他插件
-- 业务插件不进底座仓库与安装包，以独立插件包分发
-- 破坏性操作必须需要用户确认
-- API 遵循 RESTful 风格，前缀 `/api/v1`
-- 提交前确保后端可启动、前端可编译、测试通过
+设计上的关键取舍，几乎都能在调研笔记里找到出处：WeKnora 的分层存储、mem0 的 ADD-only 与双重去重、graphiti 的双时序、swarmvault 的晋升门槛、nashsu 的合并保护、STORM 的引用整合、vane 的三层开关、PandaWiki 的三态发布、GitHub PR 的晋升心智。
 
 ## 更新历史
 
-| 版本 | 日期 | 要点 |
-|------|------|------|
-| v2.11.0 | 2026-11-25 | 知识库插件 P1–P3 完成：LLM Wiki 编译管线（去重预筛／Map-Reduce／STORM 引用整合／双链）、私有空间＋公开库与 PR 式晋升流（快照冻结／门槛／溯源三连）、AI 双通道召回（SQL 层隔离）、联网采集（三开关＋SSRF/robots 护栏＋crawl4ai 可选渲染）与学术三源、STORM 裁剪版深度调研（双熔断）、任务中枢＋六页面、MCP 工具扩至 8 个、公开库贡献榜；APP_VERSION 补齐至 2.11.0，中英 README 同步 |
-| v2.10.0 | 2026-11-24 | 知识库插件 P0 落地：AI 知识库插件（聊天记忆自动沉淀＋用户画像＋kb_save/kb_query MCP 工具＋记忆画像页）；宿主新增 ``chat_message_complete`` 事件与 MCP 工具 ``user`` 参数运行时注入；代理兼容层 ``proxy_compat``（导入时归一化非法 IPv6 代理环境变量）＋关键外发调用 ``trust_env=False``；MySQL 密码 URL 转义；安装向导品牌图标自包含；聊天失败引导弹窗 |
-| v2.9.1 | 2026-11-24 | 安全修复批次：logout 吊销 refresh token 闭环；登录算术验证码服务端校验（``login_captcha_enabled`` 开关，默认关）；去除明文记住密码；数据范围（data_scope）第 4 层鉴权在用户列表落地；Alembic 迁移文件入库＋0001 幂等化＋迁移纪律；401 深路由跳转修复；admin_path 构建期可配置（``VITE_ADMIN_BASE``） |
-| v2.9.0 | 2026-11-23 | 架构三项：MCP 新增 Streamable HTTP 传输（共享 JSON-RPC 分发层）；Redis 真正启用（爆破防护/ticket/吊销缓存，可降级内存）；插件 MetaData 隔离（``make_plugin_base``）＋脚手架同步 |
-| v2.8.2 | 2026-11-21 | 修复全新克隆无法构建的库内残留（Plugins.vue 误入库）；README 重写 |
-| v2.8.1 | 2026-11-20 | 依赖升级：后端 10 项小版本跟升＋greenlet 显式锁定；前端删 9 死依赖、sortablejs 转正；恢复 vue-tsc 完整检查 |
-| v2.8.0 | 2026-11-19 | 插件分层：hermes 整份移出底座仓库与安装包，底座只保留底座代码 + dev_example |
-| v2.7.0 | 2026-11-05 | AI 对话并行 run 架构 + qm 风格 UI；hermes 插件入库（v2.8.0 已回退） |
-| v2.6.0 | 2026-11-04 | AI 对话后台 run 架构上线 |
+| 日期 | 里程碑 | 要点 |
+|---|---|---|
+| 2026-11-25 | 插件 P3 | 可选渲染通道、公开库贡献榜、ZIP 打包验证、插件版本 0.2.0 |
+| 2026-11-25 | 插件 P2 | 联网采集与三层开关、SSRF/白名单/robots 护栏、学术三源、深度调研 |
+| 2026-11-25 | 插件 P1 / P1.5 | LLM Wiki 编译管线、公开库与晋升流、双通道召回、任务中枢、六页面 |
+| 2026-11-25 | 底座 v2.11.0 | 版本发布：汇总知识库插件 P1–P3，插件版本 0.2.0 |
+| 2026-11-24 | 插件 P0 | 聊天记忆沉淀、用户画像、记忆画像页、`kb_save` / `kb_query` |
+| 2026-11-24 | 底座 v2.10.0 | 聊天完成事件、MCP 保留参数注入、代理兼容层、安装向导加固 |
 
-## 社区交流
+## 贡献与社区
 
----
+- **Fork → 分支 → PR**：`feat/` / `fix/` / `refactor/` / `docs/`
+- **提交前**：`cd backend && pytest tests/ -q`；`cd frontend && npm run build`
+- **插件约定**：不直接依赖其他插件；破坏性操作必须确认；API 前缀 `/api/v1`
 
-用微信扫描下方二维码联系作者加入 ApeAdmin 用户群，反馈问题、分享使用心得：
+扫码加入 ApeAdmin 用户群：
 
 <p align="center">
-  <img src="assets/wechat-group-qr.png" alt="微信用户群二维码" width="220">
+  <img src="assets/wechat-group-qr.png" alt="微信用户群二维码" width="200">
 </p>
 
 ## License
