@@ -59,6 +59,7 @@ async def fetch_page(
     url: str,
     extra_allow: list[str] | None = None,
     respect_robots: bool = True,
+    render: bool = False,
 ) -> dict:
     """抓取单个网页 → trafilatura 抽正文 Markdown。返回 {ok, url, title, content_md}。
 
@@ -96,7 +97,40 @@ async def fetch_page(
     except httpx.HTTPError as exc:
         return {"ok": False, "msg": f"抓取失败: {exc}"}
 
-    return _extract_markdown(url, html)
+    result = _extract_markdown(url, html)
+    if not result.get("ok") and render:
+        rendered = await _render_fetch(url)
+        if rendered.get("ok"):
+            return rendered
+    return result
+
+
+def _crawl4ai_available() -> bool:
+    try:
+        import crawl4ai  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+async def _render_fetch(url: str) -> dict:
+    """渲染通道（可选）：装了 crawl4ai extras（含 playwright）才可用，否则明确降级提示。"""
+    if not _crawl4ai_available():
+        return {
+            "ok": False,
+            "msg": "该站点需要渲染引擎（extras 未安装：pip install crawl4ai 可选启用）",
+        }
+    try:
+        from crawl4ai import AsyncWebCrawler
+
+        async with AsyncWebCrawler() as crawler:
+            result = await crawler.arun(url=url)
+            md = (getattr(result, "markdown", None) or "").strip()
+            if not md or len(md) < 80:
+                return {"ok": False, "msg": "渲染后正文为空"}
+            return {"ok": True, "url": url, "title": url[:100], "content_md": md}
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "msg": f"渲染抓取失败: {exc}"}
 
 
 def _extract_markdown(url: str, html: str) -> dict:

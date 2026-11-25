@@ -1,8 +1,8 @@
 {
   "name": "knowledge_base",
   "display_name": "AI 知识库",
-  "version": "0.1.0",
-  "description": "聊天知识自动沉淀与用户画像：对话完成后自动提取值得记忆的事实与偏好（去重合并），形成个人画像，并可通过 MCP 工具 kb_save / kb_query 由 AI 助手主动存取。",
+  "version": "0.2.0",
+  "description": "把聊天沉淀、LLM Wiki 编译、公开库协作与联网调研串成一条知识生产流水线：记忆自动提取与画像（P0）、词条编译＋私有空间＋公开库晋升流＋双通道召回（P1）、联网采集＋学术三源＋深度调研（P2）、渲染通道＋贡献榜（P3）。",
   "author": "ApeAdmin",
   "dependencies": []
 }

@@ -310,3 +310,4 @@ export const getKbJobs = (params?: any) => request.get('/knowledge-base/jobs', {
 export const retryKbJob = (id: number) => request.post(`/knowledge-base/jobs/${id}/retry`)
 export const getKbWebSettings = () => request.get('/knowledge-base/settings/web')
 export const putKbWebSettings = (data: any) => request.put('/knowledge-base/settings/web', data)
+export const getKbContributions = () => request.get('/knowledge-base/contributions')

@@ -59,6 +59,44 @@
       </el-tab-pane>
     </el-tabs>
 
+    <!-- 公开库贡献榜 -->
+    <section class="contrib-section">
+      <div class="contrib-head">
+        <h3>{{ t('knowledge.contributions.title') }}</h3>
+        <p class="text-muted">{{ t('knowledge.contributions.subtitle') }}</p>
+      </div>
+      <div class="contrib-grid">
+        <el-card shadow="never" class="contrib-board" v-loading="contribLoading">
+          <div v-if="!contribBoard.length" class="contrib-empty">
+            <el-empty :description="t('knowledge.contributions.empty')" :image-size="64" />
+          </div>
+          <ol v-else class="board-list">
+            <li v-for="(item, idx) in contribBoard" :key="item.author_id" class="board-row">
+              <span class="rank" :class="{ top: idx < 3 }">{{ idx + 1 }}</span>
+              <span class="author">{{ item.author }}</span>
+              <span class="count">{{ item.pages }} <em>{{ t('knowledge.contributions.pages') }}</em></span>
+            </li>
+          </ol>
+          <p v-if="contribBoard.length" class="board-foot text-muted">{{ t('knowledge.contributions.foot') }}</p>
+        </el-card>
+
+        <el-card shadow="never" class="contrib-mine" v-loading="contribLoading">
+          <div class="mine-label">{{ t('knowledge.contributions.mineLabel') }}</div>
+          <div class="mine-nums">
+            <div class="mine-num">
+              <strong>{{ contribMine.approved ?? 0 }}</strong>
+              <span>{{ t('knowledge.contributions.approved') }}</span>
+            </div>
+            <div class="mine-num">
+              <strong>{{ contribMine.pending ?? 0 }}</strong>
+              <span>{{ t('knowledge.contributions.pending') }}</span>
+            </div>
+          </div>
+          <p class="mine-tip text-muted">{{ t('knowledge.contributions.mineTip') }}</p>
+        </el-card>
+      </div>
+    </section>
+
     <!-- 快照预览 -->
     <el-dialog v-model="snapshotVisible" :title="t('knowledge.promotions.snapshot')" width="640px" top="6vh">
       <div class="snapshot-body" v-html="snapshotHtml"></div>
@@ -73,14 +111,17 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 
-import { getKbPromotions, getMyKbPromotions, reviewKbPromotion } from '@/api'
+import { getKbPromotions, getMyKbPromotions, reviewKbPromotion, getKbContributions } from '@/api'
 
 const { t } = useI18n()
 
 const tab = ref('review')
 const loading = ref(false)
+const contribLoading = ref(false)
 const reviewItems = ref<any[]>([])
 const myItems = ref<any[]>([])
+const contribBoard = ref<any[]>([])
+const contribMine = ref<any>({ approved: 0, pending: 0 })
 const snapshotVisible = ref(false)
 const snapshotHtml = ref('')
 
@@ -106,6 +147,17 @@ async function fetchAll() {
     myItems.value = mine?.items ?? []
   } finally {
     loading.value = false
+  }
+}
+
+async function fetchContrib() {
+  contribLoading.value = true
+  try {
+    const res: any = await getKbContributions()
+    contribBoard.value = res?.board ?? []
+    contribMine.value = res?.mine ?? { approved: 0, pending: 0 }
+  } finally {
+    contribLoading.value = false
   }
 }
 
@@ -142,7 +194,10 @@ async function handleReview(row: any, approve: boolean) {
   }
 }
 
-onMounted(fetchAll)
+onMounted(() => {
+  fetchAll()
+  fetchContrib()
+})
 </script>
 
 <style scoped>
@@ -161,5 +216,131 @@ onMounted(fetchAll)
   max-height: 60vh;
   overflow: auto;
   word-break: break-word;
+}
+
+/* 公开库贡献榜 */
+.contrib-section {
+  margin-top: 28px;
+}
+
+.contrib-head h3 {
+  margin: 0 0 2px;
+  font-size: 16px;
+}
+
+.contrib-head p {
+  margin: 0 0 12px;
+  font-size: 13px;
+}
+
+.contrib-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: 16px;
+}
+
+@media (max-width: 900px) {
+  .contrib-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.board-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.board-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 2px;
+  border-bottom: 1px dashed var(--el-border-color-lighter);
+}
+
+.board-row:last-child {
+  border-bottom: none;
+}
+
+.rank {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  background: var(--el-fill-color-light);
+  color: var(--el-text-color-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.rank.top {
+  background: var(--el-color-primary-light-8);
+  color: var(--el-color-primary);
+  font-weight: 600;
+}
+
+.author {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+}
+
+.count {
+  font-size: 13px;
+  color: var(--el-text-color-regular);
+  font-variant-numeric: tabular-nums;
+}
+
+.count em {
+  font-style: normal;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.board-foot {
+  margin: 10px 0 0;
+  font-size: 12px;
+}
+
+.mine-label {
+  margin-bottom: 14px;
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+}
+
+.mine-nums {
+  display: flex;
+  gap: 28px;
+}
+
+.mine-num {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mine-num strong {
+  font-size: 26px;
+  line-height: 1.1;
+  color: var(--el-color-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.mine-num span {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.mine-tip {
+  margin: 16px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
 }
 </style>

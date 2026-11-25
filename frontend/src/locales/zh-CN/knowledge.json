@@ -177,5 +177,16 @@
     "acTitle": "学术检索",
     "acDesc": "arXiv / OpenAlex / Semantic Scholar 为公开元数据接口，无需开关",
     "privacy": "记忆与画像数据仅本人可见；沉淀开关可在画像页控制"
+  },
+  "contributions": {
+    "title": "公开库贡献榜",
+    "subtitle": "按已发布词条数排名——公开库 live 内容仅展示原作者",
+    "empty": "公开库暂无已发布词条，成为第一个贡献者",
+    "pages": "条词条",
+    "foot": "统计口径：公开空间 live 词条；晋升发布后归属于原作者",
+    "mineLabel": "我的贡献",
+    "approved": "已通过晋升",
+    "pending": "待审核",
+    "mineTip": "私库词条晋升需满足门槛（来源数 ≥ 3、置信度 ≥ 0.8）；批准后发布为公开库草稿，归属仍记原提交人。"
   }
 }

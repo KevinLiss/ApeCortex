@@ -177,5 +177,16 @@
     "acTitle": "Academic Search",
     "acDesc": "arXiv / OpenAlex / Semantic Scholar are public metadata APIs, no toggle needed",
     "privacy": "Memories and profiles are visible only to you"
+  },
+  "contributions": {
+    "title": "Public Library Leaderboard",
+    "subtitle": "Ranked by published pages — public live content is attributed to original authors",
+    "empty": "No published pages yet — be the first contributor",
+    "pages": "pages",
+    "foot": "Scope: live pages in public spaces; approved promotions stay attributed to the original author.",
+    "mineLabel": "My contribution",
+    "approved": "Approved",
+    "pending": "In review",
+    "mineTip": "Promotion requires source_count ≥ 3 and confidence ≥ 0.8; approved pages are published as public drafts attributed to the submitter."
   }
 }

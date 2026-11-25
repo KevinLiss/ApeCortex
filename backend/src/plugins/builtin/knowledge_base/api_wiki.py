@@ -458,3 +458,64 @@ async def put_web_settings(
         "web_enabled": enable,
         "domain_allow": await get_domain_allowlist(user.id),
     })
+
+
+# ---------------------------------------------------------------- 贡献统计（P3）
+
+@router.get("/contributions")
+async def get_contributions(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+    _perm: Annotated[User, Depends(_require_perm("knowledge_base:page:list"))],
+):
+    """公开库贡献榜（谁贡献了多少已发布词条）+ 个人贡献摘要。"""
+    from src.models import User as SysUser
+
+    # 公开库 live 词条聚合
+    stmt = (
+        select(
+            KbWikiPage.origin_author_id,
+            func.count(KbWikiPage.id),
+        )
+        .join(KbSpace, KbWikiPage.space_id == KbSpace.id)
+        .where(
+            KbSpace.visibility == "public",
+            KbWikiPage.status == "live",
+            KbWikiPage.origin_author_id.isnot(None),
+            KbWikiPage.is_deleted == False,  # noqa: E712
+        )
+        .group_by(KbWikiPage.origin_author_id)
+        .order_by(func.count(KbWikiPage.id).desc())
+        .limit(10)
+    )
+    rows = (await db.execute(stmt)).all()
+
+    # 补充用户名
+    author_ids = [r[0] for r in rows if r[0]]
+    names: dict[int, str] = {}
+    if author_ids:
+        users = (await db.execute(
+            select(SysUser.id, SysUser.nickname, SysUser.username).where(SysUser.id.in_(author_ids))
+        )).all()
+        names = {u[0]: u[1] or u[2] for u in users}
+
+    board = [
+        {"author_id": aid, "author": names.get(aid, f"#{aid}"), "pages": cnt}
+        for aid, cnt in rows
+    ]
+
+    # 个人统计（当前用户：晋升通过数 + 在库草稿数）
+    mine_stmt = select(func.count()).select_from(KbPromotion).where(
+        KbPromotion.submitted_by == user.id, KbPromotion.status == "approved"
+    )
+    my_approved = (await db.execute(mine_stmt)).scalar_one()
+    my_pending = (await db.execute(
+        select(func.count()).select_from(KbPromotion).where(
+            KbPromotion.submitted_by == user.id, KbPromotion.status == "submitted"
+        )
+    )).scalar_one()
+
+    return success_response(data={
+        "board": board,
+        "mine": {"approved": my_approved, "pending": my_pending},
+    })

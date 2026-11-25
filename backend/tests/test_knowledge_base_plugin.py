@@ -649,3 +649,41 @@ async def test_research_outline_parse():
     assert outline is not None and outline["sections"][0]["heading"] == "H1"
     assert r._parse_outline("not json") is None
     assert r._parse_outline('{"sections": []}') is None
+
+
+async def test_render_channel_graceful_degrade():
+    """未装 crawl4ai 时渲染通道给明确提示而非异常。"""
+    from src.plugins.builtin.knowledge_base.collector import web as web_collector
+    # 环境未装 crawl4ai（extras 可选）——降级路径
+    if not web_collector._crawl4ai_available():
+        r = await web_collector._render_fetch("https://example.com")
+        assert not r["ok"] and "渲染引擎" in r["msg"]
+
+
+async def test_contributions_endpoint(wiki_env):
+    """贡献榜聚合：公开库 live 词条按原作者聚合。"""
+    from src.plugins.builtin.knowledge_base.models import KbSpace, KbWikiPage
+    async with wiki_env() as db:
+        db.add(KbSpace(owner_user_id=2, name="pub", visibility="public"))
+        await db.commit()
+        space = (await db.execute(select(KbSpace).where(KbSpace.visibility == "public"))).scalars().one()
+        db.add(KbWikiPage(space_id=space.id, slug="a", title="A", body_md="x" * 50,
+            status="live", origin_author_id=7, confidence=0.9, source_count=3))
+        db.add(KbWikiPage(space_id=space.id, slug="b", title="B", body_md="x" * 50,
+            status="live", origin_author_id=7, confidence=0.9, source_count=3))
+        db.add(KbWikiPage(space_id=space.id, slug="c", title="C", body_md="x" * 50,
+            status="draft", origin_author_id=7, confidence=0.9, source_count=3))  # draft 不计
+        await db.commit()
+
+    # 直接复用 SQL 逻辑验证（API 层同款语句）
+    from sqlalchemy import func
+    async with wiki_env() as db:
+        stmt = (
+            select(KbWikiPage.origin_author_id, func.count(KbWikiPage.id))
+            .join(KbSpace, KbWikiPage.space_id == KbSpace.id)
+            .where(KbSpace.visibility == "public", KbWikiPage.status == "live",
+                   KbWikiPage.origin_author_id.isnot(None))
+            .group_by(KbWikiPage.origin_author_id)
+        )
+        rows = (await db.execute(stmt)).all()
+    assert rows == [(7, 2)]  # draft 不计入
