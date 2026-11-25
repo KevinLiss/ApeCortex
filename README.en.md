@@ -21,7 +21,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.2.0-blue" alt="version">
+  <img src="https://img.shields.io/badge/version-2.11.0-blue" alt="version">
   <img src="https://img.shields.io/badge/python-3.11%2B-orange" alt="python">
   <img src="https://img.shields.io/badge/vue-3.5-brightgreen" alt="vue">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="license">
@@ -98,6 +98,21 @@ Built-in MCP tools:
 - **Streaming SSE** — streaming output + real-time Markdown rendering + code highlighting
 - **Function Calling** — AI can invoke MCP tools to perform admin operations, up to 5 rounds of tool-call loops
 - **Key management** — manage AI provider keys in the admin panel, encrypted at rest with Fernet (key derived from JWT_SECRET)
+
+### Knowledge Base Plugin (knowledge_base)
+
+Built-in plugin that turns chat into a knowledge pipeline — memory capture, LLM Wiki compilation, a shared public library, and web/academic research:
+
+- **Automatic memory capture (P0)** — after each chat turn, a background job extracts durable facts / preferences / habits (single ADD-only LLM pass, MD5 dedup, evidence-based reinforcement)
+- **Bi-temporal memory model (P0)** — validity axis (``valid_at`` / ``invalid_at``) plus system transaction axis; stale preferences are invalidated, never deleted
+- **Profile page (P0)** — dossier layout: identity bar, profile card, memory timeline with confidence bars and type filters
+- **MCP tools with runtime ``user`` injection (P0)** — 8 tools (``kb_save`` / ``kb_query`` and more); ``user`` never appears in the JSON schema, so the model can neither see nor forge it
+- **LLM Wiki compilation (P1)** — sources → Jaccard dedup prefilter → Map extraction → Reduce merge (shrinkage guard) → STORM citation integration (``[n]`` renumbering + References) → wikilink pass
+- **Private spaces + public library (P1)** — space-level ``visibility``; private pages enter the public library through a PR-style promotion flow (frozen snapshot → review → independent published copy retaining provenance and original author); gate: source_count ≥ 3, confidence ≥ 0.8
+- **Dual-channel retrieval (P1)** — private pages hard-filtered by ``user_id`` in SQL (leak-proof) plus public live-only pages, merged in one response; the leaderboard aggregates public pages by original author
+- **Web collection with 3-layer switch (P2)** — httpx + trafilatura extraction (SSRF private-range block, domain allowlist, robots, size/type guards); optional crawl4ai render channel degrades gracefully; web access is off by default and requires explicit consent before any data leaves the host
+- **Academic search & deep research (P2)** — arXiv / OpenAlex / Semantic Scholar with polite throttling; trimmed STORM pipeline (outline → per-section search → cited draft) with LLM-call and token circuit breakers
+- **Task hub & six pages (P1/P2)** — per-user background jobs (orphan recovery, retry); profile / spaces / pages / promotions + leaderboard / tasks / settings
 
 ### Audit Logs
 
@@ -441,6 +456,8 @@ Contributions are welcome!
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| v2.11.0 | 2026-11-25 | Knowledge base plugin P1–P3: LLM Wiki compilation (dedup prefilter / Map-Reduce / STORM citations / wikilinks), private spaces + public library with PR-style promotion (frozen snapshot / gate / provenance), dual-channel retrieval with SQL-level isolation, web collection (3-layer switch + SSRF/robots guards + optional crawl4ai rendering), three academic sources, trimmed STORM deep research with circuit breakers, task hub + six pages, 8 MCP tools, public-library leaderboard; APP_VERSION bumped to 2.11.0, both READMEs synced |
+| v2.10.0 | 2026-11-24 | Knowledge base plugin P0: chat memory capture, user profile, ``kb_save``/``kb_query`` MCP tools, profile page; host adds ``chat_message_complete`` event and runtime ``user`` injection for MCP tools; proxy normalization (``proxy_compat``) + ``trust_env=False`` on outbound calls; MySQL password URL escaping; branded setup-wizard icon; chat failure guidance dialog |
 | v2.9.1 | 2026-11-24 | Security fix batch: logout now revokes the companion refresh token; server-side arithmetic captcha for login (``login_captcha_enabled`` switch, off by default); plaintext "remember password" removed; layer-4 data scope (Role.data_scope) live on the user list; Alembic migration files tracked in git + idempotent 0001 + migration discipline doc; 401 deep-route redirect fix; admin_path configurable at build time (``VITE_ADMIN_BASE``) |
 | v2.9.0 | 2026-11-23 | Architecture trio: MCP adds Streamable HTTP transport (shared JSON-RPC dispatch); Redis truly enabled (brute-force guard / ticket / revocation cache, degradeable to memory); plugin MetaData isolation (``make_plugin_base``) + scaffold sync |
 | v2.8.2 | 2026-11-21 | Fixed fresh-clone build break from a tracked leftover (Plugins.vue); README rewrite |

@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-2.10.0-blue" alt="version">
+  <img src="https://img.shields.io/badge/version-2.11.0-blue" alt="version">
   <img src="https://img.shields.io/badge/python-3.11%2B-orange" alt="python">
   <img src="https://img.shields.io/badge/vue-3.5-brightgreen" alt="vue">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="license">
@@ -111,16 +111,22 @@ WordPress 式开箱体验，无需手工编辑配置文件：
 
 ### AI 知识库插件（knowledge_base）
 
-首个随本仓库发布的内置插件——让 AI 助手在与用户的对话中自动沉淀知识、形成个人画像：
+随本仓库发布的内置插件——把聊天沉淀、LLM Wiki 编译、公开库协作与联网调研串成一条知识生产流水线：
 
-- **聊天记忆自动沉淀** —— 每轮对话完成后后台提取值得长期记住的事实/偏好/习惯/事件（单次 LLM ADD-only 提取，MD5 去重；重复出现自动强化置信度，不做 LLM 更新决策）
-- **双时序记忆模型** —— 事实有效轴（valid_at / invalid_at）＋系统事务轴，旧偏好不删除只打标失效，画像随时间演化全程可审计
-- **记忆画像页** —— 档案式布局：身份条＋画像卡片＋记忆时间线（置信度进度条、证据计数、类型筛选）
-- **MCP 工具 kb_save / kb_query** —— AI 助手可主动存取用户知识；``user`` 参数由运行时注入（不出现在 JSON Schema，模型不可见不可伪造，行级隔离）
+- **聊天记忆自动沉淀**（P0）—— 每轮对话完成后后台提取值得长期记住的事实/偏好/习惯/事件（单次 LLM ADD-only 提取，MD5 去重；重复出现自动强化置信度，不做 LLM 更新决策）
+- **双时序记忆模型**（P0）—— 事实有效轴（valid_at / invalid_at）＋系统事务轴，旧偏好不删除只打标失效，画像随时间演化全程可审计
+- **记忆画像页**（P0）—— 档案式布局：身份条＋画像卡片＋记忆时间线（置信度进度条、证据计数、类型筛选）
+- **MCP 工具由 AI 主动存取**（P0）—— ``kb_save`` / ``kb_query`` 等 8 个工具；``user`` 参数由运行时注入（不出现在 JSON Schema，模型不可见不可伪造，行级隔离）
 - **隐私合规** —— 记忆仅本人可见可删；沉淀全程异步后台任务，绝不阻塞聊天
 - **宿主新增 ``chat_message_complete`` 事件** —— 插件监听聊天完成钩子做后处理（零侵入插件范式）
+- **LLM Wiki 词条编译**（P1）—— 文档/调研入源 → Jaccard 去重预筛 → Map 提取 → Reduce 合并（70% 缩水保护）→ STORM 引用整合（``[n]`` 重排＋References）→ 双链 linkify，产出可追溯词条
+- **私有空间＋公开库**（P1）—— 空间级 ``visibility``；私库词条经 PR 式晋升流（冻结快照 → 审核 → 批准发布独立副本，溯源三连保留原作者）进入公开库；门槛 source_count ≥ 3、confidence ≥ 0.8
+- **AI 双通道召回**（P1）—— 私库按 ``user_id`` 在 SQL 层硬过滤（防泄漏）＋公开库 live-only，统一合并返回；公开库贡献榜按原作者聚合
+- **联网采集与三层开关**（P2）—— httpx＋trafilatura 纯函数抽取（SSRF 私网拦截／域名白名单／robots／大小类型护栏），可选 crawl4ai 渲染通道优雅降级；联网默认关，开启需显式确认数据外发
+- **学术检索与深度调研**（P2）—— arXiv / OpenAlex / Semantic Scholar 三源（各自礼貌节流）；STORM 裁剪版调研：大纲 → 逐节检索 → 带引用成文（LLM 调用数与 token 双熔断），产出落草稿待审
+- **任务中枢与六页面**（P1/P2）—— per-user 后台任务（孤儿恢复／失败重试）；记忆画像／知识空间／词条编辑／晋升审核＋贡献榜／任务中心／插件设置
 
-> 规划与选型依据见 [docs/knowledge-base](docs/knowledge-base/)：插件开发规划 ＋ 24 个开源对标仓库的代码精读调研笔记（WeKnora / mem0 / STORM / SwarmVault / EverOS 等）。P1（LLM Wiki 词条编译）与 P2（联网采集）见规划文档分期。
+> 规划与选型依据见 [docs/knowledge-base](docs/knowledge-base/)：插件开发规划 ＋ 24 个开源对标仓库的代码精读调研笔记（WeKnora / mem0 / STORM / SwarmVault / EverOS 等）。P0（聊天记忆）／P1（LLM Wiki 编译＋公开库）／P2（联网采集＋深度调研）／P3（渲染通道＋贡献榜＋打包）均已落地。
 
 ### 审计日志
 
@@ -442,6 +448,7 @@ class MyPlugin(PluginInterface):
 
 | 版本 | 日期 | 要点 |
 |------|------|------|
+| v2.11.0 | 2026-11-25 | 知识库插件 P1–P3 完成：LLM Wiki 编译管线（去重预筛／Map-Reduce／STORM 引用整合／双链）、私有空间＋公开库与 PR 式晋升流（快照冻结／门槛／溯源三连）、AI 双通道召回（SQL 层隔离）、联网采集（三开关＋SSRF/robots 护栏＋crawl4ai 可选渲染）与学术三源、STORM 裁剪版深度调研（双熔断）、任务中枢＋六页面、MCP 工具扩至 8 个、公开库贡献榜；APP_VERSION 补齐至 2.11.0，中英 README 同步 |
 | v2.10.0 | 2026-11-24 | 知识库插件 P0 落地：AI 知识库插件（聊天记忆自动沉淀＋用户画像＋kb_save/kb_query MCP 工具＋记忆画像页）；宿主新增 ``chat_message_complete`` 事件与 MCP 工具 ``user`` 参数运行时注入；代理兼容层 ``proxy_compat``（导入时归一化非法 IPv6 代理环境变量）＋关键外发调用 ``trust_env=False``；MySQL 密码 URL 转义；安装向导品牌图标自包含；聊天失败引导弹窗 |
 | v2.9.1 | 2026-11-24 | 安全修复批次：logout 吊销 refresh token 闭环；登录算术验证码服务端校验（``login_captcha_enabled`` 开关，默认关）；去除明文记住密码；数据范围（data_scope）第 4 层鉴权在用户列表落地；Alembic 迁移文件入库＋0001 幂等化＋迁移纪律；401 深路由跳转修复；admin_path 构建期可配置（``VITE_ADMIN_BASE``） |
 | v2.9.0 | 2026-11-23 | 架构三项：MCP 新增 Streamable HTTP 传输（共享 JSON-RPC 分发层）；Redis 真正启用（爆破防护/ticket/吊销缓存，可降级内存）；插件 MetaData 隔离（``make_plugin_base``）＋脚手架同步 |
