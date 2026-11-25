@@ -523,11 +523,18 @@ async def publish_page(page_id: int, user_id: int, status: str = "live") -> dict
         space = await db.get(KbSpace, page.space_id)
         if space is None:
             return {"ok": False, "msg": "空间不存在"}
-        # 写权限硬校验：公开库只有 owner/维护者（v1: 空间 owner）能改状态
-        if space.visibility == "public" and space.owner_user_id != user_id:
-            return {"ok": False, "msg": "公开库仅空间维护者可变更状态"}
-        if space.visibility == "private" and space.owner_user_id != user_id:
-            return {"ok": False, "msg": "仅空间所有者可变更状态"}
+        # 写权限硬校验：公开库/私有库仅空间 owner；共享库 owner 或 writer（M3 补丁：
+        # shared 此前不落任何分支，导致 reader 成员也能改状态）
+        if space.visibility in ("public", "private"):
+            if space.owner_user_id != user_id:
+                msg = "公开库仅空间维护者可变更状态" if space.visibility == "public" else "仅空间所有者可变更状态"
+                return {"ok": False, "msg": msg}
+        else:  # shared
+            from src.plugins.builtin.knowledge_base.pipeline.ingest_api import get_space_role
+
+            role = await get_space_role(user_id, space.id)
+            if role not in ("owner", "writer"):
+                return {"ok": False, "msg": "共享库仅所有者或 writer 成员可变更状态"}
         page.status = status
         page.last_edit_source = "user"
         page.version += 1

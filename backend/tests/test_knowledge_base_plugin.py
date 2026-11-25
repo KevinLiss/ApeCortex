@@ -897,3 +897,24 @@ async def test_memory_different_subject_not_invalidated(kb_env, mock_llm):
 
     hits, _ = await memory_pipeline.search_memories(1, "")
     assert len(hits) == 2
+
+
+# ---------------------------------------------------------------- M3 补丁：共享库发布权限
+async def test_shared_space_publish_requires_writer(wiki_env):
+    """reader 成员不能改状态；writer/owner 可以（此前 shared 不在任何分支 → 越权）。"""
+    from src.plugins.builtin.knowledge_base.models import KbSpaceMember
+    from src.plugins.builtin.knowledge_base.pipeline import compiler as c
+
+    async with wiki_env() as db:
+        db.add(KbSpace(owner_user_id=1, name="团队库", visibility="shared"))
+        await db.commit()
+        space = (await db.execute(select(KbSpace))).scalars().first()
+        db.add(KbWikiPage(space_id=space.id, slug="draft-1", title="草稿",
+            body_md="内容" * 30, status="draft", confidence=0.9, source_count=3))
+        db.add(KbSpaceMember(space_id=space.id, user_id=2, role="reader"))
+        db.add(KbSpaceMember(space_id=space.id, user_id=3, role="writer"))
+        await db.commit()
+        page_id = (await db.execute(select(KbWikiPage))).scalars().first().id
+
+    assert (await c.publish_page(page_id, user_id=2, status="live"))["ok"] is False   # reader 被拒
+    assert (await c.publish_page(page_id, user_id=3, status="live"))["ok"] is True    # writer 通过
