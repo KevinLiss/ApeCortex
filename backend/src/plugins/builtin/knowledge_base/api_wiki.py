@@ -320,6 +320,24 @@ async def get_promotions(
         self_review_setting
         and str(self_review_setting.value).strip().lower() in ("true", "1", '"true"')
     )
+    # 目标空间同 slug 现版（冲突感知：批准会创建 -2 后缀副本）
+    current_map: dict[tuple[int, str], dict] = {}
+    targets = {(r.target_space_id, r.snapshot_slug) for r in items}
+    if targets:
+        space_ids = {t[0] for t in targets}
+        slugs = {t[1] for t in targets}
+        current_rows = list((await db.execute(
+            select(KbWikiPage).where(
+                KbWikiPage.space_id.in_(space_ids),
+                KbWikiPage.slug.in_(slugs),
+                KbWikiPage.is_deleted == False,  # noqa: E712
+            )
+        )).scalars().all())
+        for p in current_rows:
+            current_map[(p.space_id, p.slug)] = {
+                "id": p.id, "version": p.version, "status": p.status, "title": p.title,
+            }
+
     return success_response(data={
         "total": total,
         "items": [{
@@ -331,6 +349,7 @@ async def get_promotions(
             "published_page_id": r.published_page_id,
             # 自审制衡：自己的申请不显示批准/拒绝（后端另有硬校验；可由设置放开）
             "can_review": allow_self_review or r.submitted_by != user.id,
+            "current_page": current_map.get((r.target_space_id, r.snapshot_slug)),
         } for r in items],
     })
 
@@ -496,8 +515,11 @@ async def get_contributions(
     db: Annotated[AsyncSession, Depends(get_db)],
     user: Annotated[User, Depends(get_current_user)],
     _perm: Annotated[User, Depends(_require_perm("knowledge_base:page:list"))],
+    range: str = Query(default="all", description="all/week/month（按更新时间窗）"),
 ):
     """公开库贡献榜（谁贡献了多少已发布词条）+ 个人贡献摘要。"""
+    from datetime import datetime, timedelta, timezone
+
     from src.models import User as SysUser
 
     # 公开库 live 词条聚合
@@ -517,6 +539,9 @@ async def get_contributions(
         .order_by(func.count(KbWikiPage.id).desc())
         .limit(10)
     )
+    if range in ("week", "month"):
+        days = 7 if range == "week" else 30
+        stmt = stmt.where(KbWikiPage.updated_at >= datetime.now(timezone.utc) - timedelta(days=days))
     rows = (await db.execute(stmt)).all()
 
     # 补充用户名

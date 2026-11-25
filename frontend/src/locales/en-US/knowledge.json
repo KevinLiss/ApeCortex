@@ -169,7 +169,11 @@
     "pendingPublish": "Publish",
     "pendingPublished": "Published live",
     "pendingTip": "Approved promotions land as drafts; a public-space maintainer must publish them to live before they can be recalled.",
-    "colSpace": "Space"
+    "colSpace": "Space",
+    "rangeAll": "All",
+    "rangeWeek": "This week",
+    "rangeMonth": "This month",
+    "conflictWarn": "The target public library already has this slug at v{version} ({status}); approving will create a suffixed copy."
   },
   "tasks": {
     "title": "Task Center",

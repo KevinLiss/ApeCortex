@@ -26,13 +26,42 @@ def _scored_hit(text: str, query_words: list[str], base: float) -> tuple[float, 
     return base * (0.4 + 0.6 * coverage), coverage
 
 
+# 轻量同义词扩展（M4）：中英别名互扩，提升跨语言/缩写召回；不做会误命中的 2-gram 泛化
+_SYNONYMS: dict[str, tuple[str, ...]] = {
+    "rag": ("检索增强", "retrieval augmented"),
+    "检索增强": ("rag",),
+    "llm": ("大模型", "语言模型"),
+    "大模型": ("llm",),
+    "mcp": ("工具协议", "model context protocol"),
+    "向量": ("embedding", "语义检索"),
+    "embedding": ("向量",),
+    "知识库": ("knowledge base", "kb"),
+}
+
+
 def _split_words(query: str) -> list[str]:
     import re
     words = [w for w in re.split(r"\s+", query.strip()) if w]
     # 中文查询整串也算一个词（子串匹配）
     if query.strip() and len(query.strip()) >= 2:
         words.append(query.strip())
-    return words
+    # 同义词扩展（仅对命中词表的关键词）
+    expanded = list(words)
+    for w in words:
+        for syn in _SYNONYMS.get(w.lower(), ()):
+            expanded.append(syn)
+    return list(dict.fromkeys(expanded))
+
+
+def _score_page(title: str, body: str, query_words: list[str], base: float) -> tuple[float, float]:
+    """字段加权打分（M4）：标题命中权重 2、正文 1；coverage 取"有命中的查询词比例"。"""
+    if not query_words:
+        return base, 1.0
+    title_hit = sum(1 for w in query_words if w and w in title)
+    body_hit = sum(1 for w in query_words if w and w in body)
+    weighted = (2 * title_hit + body_hit) / (3 * len(query_words))
+    coverage = sum(1 for w in query_words if w and (w in title or w in body)) / len(query_words)
+    return base * (0.4 + 0.6 * weighted), coverage
 
 
 async def search_all(
@@ -129,7 +158,7 @@ async def search_all(
         def _rank(pages, weight):
             scored = []
             for p, sp in pages:
-                s, cov = _scored_hit(p.title + p.body_md[:500], words, weight)
+                s, cov = _score_page(p.title, p.body_md[:500], words, weight)
                 if q and cov <= 0:
                     continue  # 零命中：不返回兜底垃圾（M1 相关性纪律）
                 scored.append((p, sp, s, cov))

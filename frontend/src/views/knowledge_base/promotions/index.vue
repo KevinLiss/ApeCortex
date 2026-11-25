@@ -88,8 +88,15 @@
     <!-- 公开库贡献榜 -->
     <section class="contrib-section">
       <div class="contrib-head">
-        <h3>{{ t('knowledge.contributions.title') }}</h3>
-        <p class="text-muted">{{ t('knowledge.contributions.subtitle') }}</p>
+        <div>
+          <h3>{{ t('knowledge.contributions.title') }}</h3>
+          <p class="text-muted">{{ t('knowledge.contributions.subtitle') }}</p>
+        </div>
+        <el-radio-group v-model="contribRange" size="small" @change="fetchContrib">
+          <el-radio-button label="all">{{ t('knowledge.promotions.rangeAll') }}</el-radio-button>
+          <el-radio-button label="week">{{ t('knowledge.promotions.rangeWeek') }}</el-radio-button>
+          <el-radio-button label="month">{{ t('knowledge.promotions.rangeMonth') }}</el-radio-button>
+        </el-radio-group>
       </div>
       <div class="contrib-grid">
         <el-card shadow="never" class="contrib-board" v-loading="contribLoading">
@@ -125,6 +132,8 @@
 
     <!-- 快照预览 -->
     <el-dialog v-model="snapshotVisible" :title="t('knowledge.promotions.snapshot')" width="640px" top="6vh">
+      <el-alert v-if="snapshotConflict" type="warning" :closable="false" show-icon class="conflict-alert"
+        :title="t('knowledge.promotions.conflictWarn', { version: snapshotConflict.version, status: snapshotConflict.status })" />
       <div class="snapshot-body" v-html="snapshotHtml"></div>
     </el-dialog>
   </div>
@@ -150,6 +159,8 @@ const myItems = ref<any[]>([])
 const contribBoard = ref<any[]>([])
 const contribMine = ref<any>({ approved: 0, pending: 0 })
 const pendingItems = ref<any[]>([])
+const contribRange = ref('all')
+const snapshotConflict = ref<any>(null)
 const pendingLoading = ref(false)
 const userStore = useUserStore()
 const canPublish = computed(() => userStore.hasPermission('knowledge_base:page:publish'))
@@ -202,7 +213,7 @@ async function handlePublishPending(row: any) {
 async function fetchContrib() {
   contribLoading.value = true
   try {
-    const res: any = await getKbContributions()
+    const res: any = await getKbContributions({ range: contribRange.value })
     contribBoard.value = res?.board ?? []
     contribMine.value = res?.mine ?? { approved: 0, pending: 0 }
   } finally {
@@ -211,6 +222,7 @@ async function fetchContrib() {
 }
 
 function openSnapshot(row: any) {
+  snapshotConflict.value = row.current_page || null
   const md = row.snapshot_md || ''
   try {
     snapshotHtml.value = DOMPurify.sanitize(marked.parse(md) as string)
@@ -281,6 +293,17 @@ onMounted(() => {
 /* 公开库贡献榜 */
 .contrib-section {
   margin-top: 28px;
+}
+
+.contrib-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.conflict-alert {
+  margin-bottom: 12px;
 }
 
 .contrib-head h3 {

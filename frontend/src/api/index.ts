@@ -310,7 +310,7 @@ export const getKbJobs = (params?: any, opts?: any) => request.get('/knowledge-b
 export const retryKbJob = (id: number) => request.post(`/knowledge-base/jobs/${id}/retry`)
 export const getKbWebSettings = () => request.get('/knowledge-base/settings/web')
 export const putKbWebSettings = (data: any) => request.put('/knowledge-base/settings/web', data)
-export const getKbContributions = () => request.get('/knowledge-base/contributions')
+export const getKbContributions = (params?: any) => request.get('/knowledge-base/contributions', { params })
 
 // ---- Knowledge Base M3：共享成员 / 待发布 / 只读凭证 ----
 export const getKbSpaceMembers = (spaceId: number) => request.get(`/knowledge-base/spaces/${spaceId}/members`)

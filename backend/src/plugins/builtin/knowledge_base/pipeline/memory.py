@@ -141,6 +141,55 @@ def is_system_noise(content: str) -> bool:
     return any(pat.search(content or "") for pat in _NOISE_PATTERNS)
 
 
+# 冲突演化（M4）：同类型 + 同主体前缀 + 高相似但不同值 → 旧事实软失效（graphiti 双时序）
+_CONFLICT_SIM = 0.45
+_CONFLICT_SUBJECT_LEN = 4
+_CONFLICT_TYPES = ("fact", "preference")
+
+
+def _shingles(text: str) -> set[str]:
+    """中文 2-gram + 英文/数字词（用于轻量相似度）。"""
+    tokens: set[str] = set()
+    for w in re.findall(r"[A-Za-z0-9_]+", text.lower()):
+        tokens.add(w)
+    cn = re.sub(r"[^\u4e00-\u9fff]", "", text)
+    for i in range(len(cn) - 1):
+        tokens.add(cn[i:i + 2])
+    return tokens
+
+
+def _jaccard(a: set[str], b: set[str]) -> float:
+    if not a or not b:
+        return 0.0
+    return len(a & b) / len(a | b)
+
+
+async def _invalidate_conflicts(db, user_id: int, content: str, mem_type: str, now) -> int:
+    """新旧事实并存时，把旧条目打 invalid_at（不删除，保留演化史）。"""
+    from src.plugins.builtin.knowledge_base.models import KbMemoryItem
+
+    if mem_type not in _CONFLICT_TYPES:
+        return 0
+    rows = list((await db.execute(
+        select(KbMemoryItem).where(
+            KbMemoryItem.user_id == user_id,
+            KbMemoryItem.mem_type == mem_type,
+            KbMemoryItem.invalid_at.is_(None),
+            KbMemoryItem.expired_at.is_(None),
+        )
+    )).scalars().all())
+    new_tokens = _shingles(content)
+    invalidated = 0
+    for old in rows:
+        if old.content[: _CONFLICT_SUBJECT_LEN] != content[: _CONFLICT_SUBJECT_LEN]:
+            continue  # 主体不同，不算冲突
+        if _jaccard(new_tokens, _shingles(old.content)) >= _CONFLICT_SIM:
+            old.invalid_at = now
+            invalidated += 1
+            logger.info(f"[KnowledgeBase] 记忆演化失效: {old.content[:40]} ← {content[:40]}")
+    return invalidated
+
+
 def parse_extraction_response(raw: str) -> list[dict]:
     """解析提取响应为记忆条目列表（双层降级，永不抛异常）。"""
     if not raw or not raw.strip():
@@ -306,6 +355,8 @@ async def extract_and_store(
                 reinforced += 1
                 continue
 
+            await _invalidate_conflicts(db, user_id, item["content"], item["mem_type"], now)
+
             db.add(
                 KbMemoryItem(
                     user_id=user_id,
@@ -426,6 +477,8 @@ async def save_explicit(user_id: int, content: str, mem_type: str = "fact") -> d
             existing.confidence = min(0.99, existing.confidence + 0.05)
             await db.commit()
             return {"ok": True, "action": "reinforced", "id": existing.id, "msg": "已存在，证据 +1"}
+
+        await _invalidate_conflicts(db, user_id, content, mem_type, datetime.now(timezone.utc))
 
         item = KbMemoryItem(
             user_id=user_id,

@@ -169,7 +169,11 @@
     "pendingPublish": "发布",
     "pendingPublished": "已发布为 live",
     "pendingTip": "晋升批准后词条先落草稿，需由公开空间维护者发布为 live 才会被召回。",
-    "colSpace": "空间"
+    "colSpace": "空间",
+    "rangeAll": "全部",
+    "rangeWeek": "本周",
+    "rangeMonth": "本月",
+    "conflictWarn": "目标公开库已有同名词条 v{version}（{status}），批准将创建带后缀的副本。"
   },
   "tasks": {
     "title": "任务中心",

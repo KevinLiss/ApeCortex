@@ -829,3 +829,71 @@ async def test_self_review_blocked_by_default(wiki_env):
     assert sub["ok"] is True
     res = await c.review_promotion(sub["promotion_id"], reviewer_id=1, approve=True)
     assert res["ok"] is False and "自己" in res["msg"]
+
+
+# ---------------------------------------------------------------- M4: 检索加权与同义词
+async def test_retrieval_title_weighted_higher(wiki_env):
+    """标题命中排在正文命中之前（字段权重）。"""
+    from src.plugins.builtin.knowledge_base.pipeline import retrieval as r
+
+    async with wiki_env() as db:
+        db.add(KbSpace(owner_user_id=1, name="私有", visibility="private"))
+        await db.commit()
+        space = (await db.execute(select(KbSpace))).scalars().first()
+        db.add(KbWikiPage(space_id=space.id, slug="body-hit", title="其它主题",
+            body_md="正文里提到了 FastAPI 的依赖注入", status="live", confidence=0.9, source_count=3))
+        db.add(KbWikiPage(space_id=space.id, slug="title-hit", title="FastAPI 指南",
+            body_md="路由与依赖注入的说明", status="live", confidence=0.9, source_count=1))
+        await db.commit()
+
+    out = await r.search_all(1, "FastAPI")
+    slugs = [p["slug"] for p in out["private_pages"]]
+    assert slugs.index("title-hit") < slugs.index("body-hit")
+
+
+async def test_retrieval_synonym_expansion(wiki_env):
+    """RAG 查询可命中「检索增强」表述（同义词扩展）。"""
+    from src.plugins.builtin.knowledge_base.pipeline import retrieval as r
+
+    async with wiki_env() as db:
+        db.add(KbSpace(owner_user_id=1, name="私有", visibility="private"))
+        await db.commit()
+        space = (await db.execute(select(KbSpace))).scalars().first()
+        db.add(KbWikiPage(space_id=space.id, slug="rag-cn", title="检索增强生成实践",
+            body_md="检索增强生成（Retrieval Augmented Generation）的工程取舍",
+            status="live", confidence=0.9, source_count=3))
+        await db.commit()
+
+    out = await r.search_all(1, "RAG")
+    assert any(p["slug"] == "rag-cn" for p in out["private_pages"])
+
+
+# ---------------------------------------------------------------- M4: 记忆冲突演化
+async def test_memory_conflict_invalidates_old(kb_env, mock_llm):
+    """同主体不同值：旧事实软失效，检索只剩新事实。"""
+    mock_llm.response = json.dumps({"memories": [{"content": "用户的前端技术栈是 Vue3", "type": "fact"}]})
+    await memory_pipeline.extract_and_store(1, 1, transcript_override="用户: 我的前端技术栈是 Vue3，组件库用 Element Plus。")
+
+    mock_llm.response = json.dumps({"memories": [{"content": "用户的前端技术栈是 React", "type": "fact"}]})
+    await memory_pipeline.extract_and_store(1, 2, transcript_override="用户: 我换成 React 了，前端技术栈是 React，状态管理用 zustand。")
+
+    hits, _ = await memory_pipeline.search_memories(1, "")
+    contents = [h["content"] for h in hits]
+    assert contents == ["用户的前端技术栈是 React"]  # 旧事实失效
+
+    from src.plugins.builtin.knowledge_base.models import KbMemoryItem
+    async with kb_env() as db:
+        rows = list((await db.execute(select(KbMemoryItem))).scalars().all())
+    old = next(r for r in rows if "Vue3" in r.content)
+    assert old.invalid_at is not None  # 保留演化史（不删除）
+
+
+async def test_memory_different_subject_not_invalidated(kb_env, mock_llm):
+    """主体不同不触发失效。"""
+    mock_llm.response = json.dumps({"memories": [{"content": "用户的前端技术栈是 Vue3", "type": "fact"}]})
+    await memory_pipeline.extract_and_store(1, 1, transcript_override="用户: 我的前端技术栈是 Vue3，组件库用 Element Plus。")
+    mock_llm.response = json.dumps({"memories": [{"content": "用户的工作地点是北京", "type": "fact"}]})
+    await memory_pipeline.extract_and_store(1, 2, transcript_override="用户: 我在北京工作，日常通勤单程大约一小时。")
+
+    hits, _ = await memory_pipeline.search_memories(1, "")
+    assert len(hits) == 2
