@@ -83,7 +83,7 @@ async function fetchSettings() {
     domainAllow.value = res?.domain_allow ?? []
     confirmed = webEnabled.value
   } catch (e: any) {
-    ElMessage.error(e?.message || 'load failed')
+    /* 错误提示由 request 拦截器统一展示（含可读化文案） */
   }
 }
 
@@ -116,7 +116,7 @@ async function save() {
     })
     ElMessage.success(t('knowledge.settings.saved'))
   } catch (e: any) {
-    ElMessage.error(e?.response?.data?.msg || e?.message || 'Error')
+    /* 错误提示由 request 拦截器统一展示（含可读化文案） */
   } finally {
     saving.value = false
   }

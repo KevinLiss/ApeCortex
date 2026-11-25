@@ -306,7 +306,7 @@ export const submitKbPromotion = (data: any) => request.post('/knowledge-base/pr
 export const getKbPromotions = (params?: any) => request.get('/knowledge-base/promotions', { params })
 export const getMyKbPromotions = () => request.get('/knowledge-base/promotions/mine')
 export const reviewKbPromotion = (id: number, approve: boolean, comment?: string) => request.post(`/knowledge-base/promotions/${id}/review`, { approve, comment })
-export const getKbJobs = (params?: any) => request.get('/knowledge-base/jobs', { params })
+export const getKbJobs = (params?: any, opts?: any) => request.get('/knowledge-base/jobs', { params, ...(opts || {}) })
 export const retryKbJob = (id: number) => request.post(`/knowledge-base/jobs/${id}/retry`)
 export const getKbWebSettings = () => request.get('/knowledge-base/settings/web')
 export const putKbWebSettings = (data: any) => request.put('/knowledge-base/settings/web', data)

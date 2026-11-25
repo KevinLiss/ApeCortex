@@ -149,7 +149,7 @@ async function fetchSpaces() {
     const res: any = await getKbSpaces()
     spaces.value = res?.items ?? []
   } catch (e: any) {
-    ElMessage.error(e?.message || 'load failed')
+    /* 错误提示由 request 拦截器统一展示（含可读化文案） */
   }
 }
 
@@ -177,7 +177,7 @@ async function handleCreate() {
     newVisibility.value = 'private'
     fetchSpaces()
   } catch (e: any) {
-    ElMessage.error(e?.response?.data?.msg || e?.message || 'Error')
+    /* 错误提示由 request 拦截器统一展示（含可读化文案） */
   } finally {
     creating.value = false
   }
@@ -201,7 +201,7 @@ async function handleUpload() {
     uploadVisible.value = false
     fetchSpaces()
   } catch (e: any) {
-    ElMessage.error(e?.response?.data?.msg || e?.message || 'Error')
+    /* 错误提示由 request 拦截器统一展示（含可读化文案） */
   } finally {
     uploading.value = false
   }

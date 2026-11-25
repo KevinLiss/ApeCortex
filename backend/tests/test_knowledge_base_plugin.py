@@ -687,3 +687,69 @@ async def test_contributions_endpoint(wiki_env):
         )
         rows = (await db.execute(stmt)).all()
     assert rows == [(7, 2)]  # draft 不计入
+
+
+# ---------------------------------------------------------------- M1: 相关性纪律
+async def test_retrieval_no_fallback_when_no_hit(wiki_env):
+    """零命中不返回兜底垃圾：问题词完全不在任何词条里 → 双通道均为空。"""
+    from src.plugins.builtin.knowledge_base.pipeline import retrieval as r
+
+    async with wiki_env() as db:
+        db.add(KbSpace(owner_user_id=1, name="私有", visibility="private"))
+        db.add(KbSpace(owner_user_id=1, name="公开", visibility="public"))
+        await db.commit()
+        spaces = list((await db.execute(select(KbSpace))).scalars().all())
+        private = next(s for s in spaces if s.visibility == "private")
+        public = next(s for s in spaces if s.visibility == "public")
+        db.add(KbWikiPage(space_id=private.id, slug="fe", title="前端技术栈",
+            body_md="Vue3 与 Element Plus 的组合", status="live", confidence=0.9, source_count=3))
+        db.add(KbWikiPage(space_id=public.id, slug="pub-fe", title="前端技术栈（公开）",
+            body_md="Vue3 与 Element Plus 的组合", status="live", confidence=0.9, source_count=3))
+        await db.commit()
+
+    out = await r.search_all(1, "量子纠缠退相干")
+    assert out["private_pages"] == [] and out["public_pages"] == []
+
+
+async def test_retrieval_low_relevance_flag(wiki_env):
+    """部分命中仍返回，但标记 low_relevance 并给出 relevance 分数。"""
+    from src.plugins.builtin.knowledge_base.pipeline import retrieval as r
+
+    async with wiki_env() as db:
+        db.add(KbSpace(owner_user_id=1, name="公开", visibility="public"))
+        await db.commit()
+        space = (await db.execute(select(KbSpace))).scalars().first()
+        db.add(KbWikiPage(space_id=space.id, slug="rag", title="RAG 与长上下文",
+            body_md="检索增强生成与长上下文窗口的取舍", status="live",
+            confidence=0.9, source_count=3))
+        await db.commit()
+
+    out = await r.search_all(2, "RAG 向量数据库选型")
+    assert out["public_pages"], "部分命中应返回结果"
+    hit = out["public_pages"][0]
+    assert hit["low_relevance"] is True and 0 < hit["relevance"] <= 1
+
+
+# ---------------------------------------------------------------- M1: 记忆提取边界
+async def test_memory_noise_filtered(kb_env, mock_llm):
+    """工具报错/系统状态不落库，真实事实照常入库。"""
+    mock_llm.response = json.dumps({"memories": [
+        {"content": "当前账号缺少 kb_query 权限，无法调用知识库检索", "type": "fact"},
+        {"content": "接口不存在，Request failed with status code 404", "type": "event"},
+        {"content": "用户的前端技术栈是 Vue3 + Element Plus", "type": "fact"},
+    ]})
+    n = await memory_pipeline.extract_and_store(
+        user_id=1, session_id=1,
+        transcript_override="用户: 我的前端技术栈是 Vue3 + Element Plus，组件库用 Element Plus。",
+    )
+    assert n == 1
+    hits, _ = await memory_pipeline.search_memories(1, "")
+    contents = [h["content"] for h in hits]
+    assert len(contents) == 1 and "Vue3" in contents[0]
+
+
+async def test_save_explicit_rejects_noise(kb_env):
+    r = await memory_pipeline.save_explicit(1, "服务未启动，请开启联网开关后重试", "event")
+    assert r["ok"] is False
+    r2 = await memory_pipeline.save_explicit(1, "用户偏好用中文回复", "preference")
+    assert r2["ok"] is True

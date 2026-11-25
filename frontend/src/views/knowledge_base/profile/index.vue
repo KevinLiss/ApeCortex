@@ -307,7 +307,7 @@ async function fetchMemories() {
     memories.value = res?.items ?? []
     total.value = res?.total ?? 0
   } catch {
-    ElMessage.error(t('knowledge.profile.loadFailed'))
+    /* 错误提示由 request 拦截器统一展示（含可读化文案） */
   } finally {
     loading.value = false
   }
@@ -330,7 +330,7 @@ async function handleRewrite() {
     fetchStats()
     fetchMemories()
   } catch (e: any) {
-    ElMessage.error(e?.response?.data?.msg || e?.message || t('knowledge.profile.loadFailed'))
+    /* 错误提示由 request 拦截器统一展示（含可读化文案） */
   } finally {
     rewriting.value = false
   }
@@ -350,7 +350,7 @@ async function handleDelete(row: any) {
     fetchMemories()
     fetchStats()
   } catch (e: any) {
-    ElMessage.error(e?.response?.data?.msg || e?.message || 'Error')
+    /* 错误提示由 request 拦截器统一展示（含可读化文案） */
   }
 }
 

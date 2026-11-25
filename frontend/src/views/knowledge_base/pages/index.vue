@@ -263,10 +263,10 @@ async function handleSave() {
     await selectPage(selected.value)
     fetchPages()
   } catch (e: any) {
-    const msg = e?.response?.status === 409
-      ? t('knowledge.pages.expectedVersionConflict')
-      : (e?.response?.data?.msg || e?.message)
-    ElMessage.error(msg || 'Error')
+    // 乐观锁冲突给专用提示；其余错误由 request 拦截器统一展示（含可读化文案）
+    if (e?.response?.status === 409) {
+      ElMessage.error(t('knowledge.pages.expectedVersionConflict'))
+    }
   } finally {
     saving.value = false
   }
@@ -286,7 +286,7 @@ async function handlePublish(target: string) {
     await selectPage(selected.value)
     fetchPages()
   } catch (e: any) {
-    ElMessage.error(e?.response?.data?.msg || e?.message || 'Error')
+    /* 错误提示由 request 拦截器统一展示（含可读化文案） */
   }
 }
 
@@ -308,7 +308,7 @@ async function handlePromote() {
     ElMessage.success(t('knowledge.pages.promoteSubmitted'))
     promoteVisible.value = false
   } catch (e: any) {
-    ElMessage.error(e?.response?.data?.msg || e?.message || 'Error')
+    /* 错误提示由 request 拦截器统一展示（含可读化文案） */
   }
 }
 

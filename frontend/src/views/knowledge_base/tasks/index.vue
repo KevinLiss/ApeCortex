@@ -117,14 +117,17 @@ function formatTime(iso: string | null): string {
   return iso.replace('T', ' ').slice(0, 19)
 }
 
-async function fetchTasks() {
-  loading.value = true
+async function fetchTasks(silent = false) {
+  if (!silent) loading.value = true
   try {
-    const res: any = await getKbJobs({ page: pageNum.value, page_size: pageSize })
+    const res: any = await getKbJobs(
+      { page: pageNum.value, page_size: pageSize },
+      silent ? { silent: true } : undefined,
+    )
     items.value = res?.items ?? []
     total.value = res?.total ?? 0
   } finally {
-    loading.value = false
+    if (!silent) loading.value = false
   }
 }
 
@@ -134,7 +137,7 @@ async function handleRetry(row: any) {
     ElMessage.success(t('knowledge.tasks.retried'))
     fetchTasks()
   } catch (e: any) {
-    ElMessage.error(e?.response?.data?.msg || e?.message || 'Error')
+    /* 错误提示由 request 拦截器统一展示（含可读化文案） */
   }
 }
 
@@ -142,7 +145,7 @@ onMounted(() => {
   fetchTasks()
   timer = setInterval(() => {
     if (autoRefresh.value && items.value.some((i) => i.status === 'running' || i.status === 'pending')) {
-      fetchTasks()
+      fetchTasks(true)  // 轮询静默，避免重复弹错
     }
   }, 5000)
 })

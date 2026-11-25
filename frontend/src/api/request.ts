@@ -1,6 +1,8 @@
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 
+import { httpHint } from '@/utils/httpHint'
+
 // Create axios instance
 const request = axios.create({
   baseURL: '/api/v1',
@@ -48,9 +50,11 @@ request.interceptors.response.use(
         const base = String(import.meta.env.VITE_ADMIN_BASE || '/admin/').replace(/\/+$/, '')
         window.location.href = `${base}/login`
       }
-    } else {
-      const msg = error.response?.data?.msg || error.message || '网络错误'
-      ElMessage.error(msg)
+    } else if (!(error.config as any)?.silent) {
+      // M1：统一可读化（404 → 提示后端未更新；网络类 → 提示服务未启动）
+      const hint = httpHint(error)
+      error.hint = hint
+      ElMessage.error(hint)
     }
     return Promise.reject(error)
   }

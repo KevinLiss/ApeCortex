@@ -13,12 +13,17 @@ from sqlalchemy import select
 from src.db import SessionLocal
 
 
-def _scored_hit(text: str, query_words: list[str], base: float) -> float:
-    """关键词覆盖率打分（v1 关键词匹配；FTS5 后续版本）。"""
+# 相关性纪律（M1）：零命中一律不返回（宁缺毋滥），低覆盖率只标注不丢弃
+_LOW_RELEVANCE_COVERAGE = 0.5
+
+
+def _scored_hit(text: str, query_words: list[str], base: float) -> tuple[float, float]:
+    """关键词覆盖率打分 → (score, coverage)。coverage=0 表示完全不相关。"""
     if not query_words:
-        return base
+        return base, 1.0
     hit = sum(1 for w in query_words if w and w in text)
-    return base * (0.4 + 0.6 * (hit / len(query_words)))
+    coverage = hit / len(query_words)
+    return base * (0.4 + 0.6 * coverage), coverage
 
 
 def _split_words(query: str) -> list[str]:
@@ -101,13 +106,20 @@ async def search_all(
             return space_cache[space_id]
 
         def _rank(pages, weight):
-            scored = [
-                (p, sp, _scored_hit(p.title + p.body_md[:500], words, weight))
-                for p, sp in pages
-            ]
-            scored = [(p, sp, s) for p, sp, s in scored if q == "" or s > 0.36]
-            scored.sort(key=lambda x: -x[2])
-            return [_fmt(p, sp) for p, sp, _ in scored[:limit]]
+            scored = []
+            for p, sp in pages:
+                s, cov = _scored_hit(p.title + p.body_md[:500], words, weight)
+                if q and cov <= 0:
+                    continue  # 零命中：不返回兜底垃圾（M1 相关性纪律）
+                scored.append((p, sp, s, cov))
+            scored.sort(key=lambda x: (-x[2], -x[0].source_count))
+            out = []
+            for p, sp, s, cov in scored[:limit]:
+                item = _fmt(p, sp)
+                item["relevance"] = round(s, 2)
+                item["low_relevance"] = bool(q) and cov < _LOW_RELEVANCE_COVERAGE
+                out.append(item)
+            return out
 
         private_out = _rank(private_pages, 1.0)
         public_out = _rank(public_pages, 0.9)

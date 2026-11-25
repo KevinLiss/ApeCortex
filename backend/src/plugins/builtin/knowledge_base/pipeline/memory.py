@@ -16,6 +16,7 @@
 import asyncio
 import hashlib
 import json
+import re
 from datetime import datetime, timezone
 
 from loguru import logger
@@ -53,6 +54,12 @@ _EXTRACT_SYSTEM_PROMPT = """你是一个记忆提取引擎，负责从对话中�
 
 【必须跳过】闲聊寒暄、临时性问答（如"这个代码怎么写"的一次性求助）、
 对话中 AI 的输出内容、与你已掌握记忆重复或矛盾程度相同的信息。
+
+【绝对禁止提取】以下不是用户知识，一律丢弃（哪怕看起来像事实）：
+- 系统 / 接口状态：权限不足、调用失败、接口不存在、服务未启动、HTTP 错误码（404/403 等）
+- 工具与插件的运行结果、报错、能力限制（如"kb_query 调用失败""当前账号缺少权限"）
+- 对 AI 的指令或对 AI 自身状态的描述（如"请开启联网开关""我无法访问网络"）
+- 一次性的操作步骤、故障排查过程、页面上的临时提示
 
 【已知记忆列表】仅供你去重参照——不要重复提取已知内容；
 若新信息与已知记忆明显更新/演化，照常提取（后续由系统合并）。
@@ -120,6 +127,18 @@ def _extract_outermost_json(text: str) -> str:
     if start != -1 and end != -1 and end > start:
         return text[start:end + 1]
     return text
+
+
+# 系统状态 / 工具报错类噪声（与 prompt 的【绝对禁止提取】配套的后置防线）
+_NOISE_PATTERNS = (
+    re.compile(r"(权限不足|无法调用|调用失败|检索失败|抓取失败|执行失败|接口不存在|服务未启动|未启动|未更新|"
+               r"未开启|请开启|需开启|Request failed|status code|HTTP\s*\d{3}|\b4\d{2}\b)"),
+)
+
+
+def is_system_noise(content: str) -> bool:
+    """判断一条候选是否属于“系统状态/工具报错”，不应作为用户知识沉淀。"""
+    return any(pat.search(content or "") for pat in _NOISE_PATTERNS)
 
 
 def parse_extraction_response(raw: str) -> list[dict]:
@@ -264,6 +283,9 @@ async def extract_and_store(
     async with SessionLocal() as db:
         seen_hashes: set[str] = set()
         for item in items:
+            if is_system_noise(item["content"]):
+                logger.info(f"[KnowledgeBase] 丢弃系统状态类记忆: {item['content'][:40]}")
+                continue
             chash = _content_hash(item["content"])
             if chash in seen_hashes:
                 continue  # 批内去重
@@ -386,6 +408,8 @@ async def save_explicit(user_id: int, content: str, mem_type: str = "fact") -> d
         return {"ok": False, "msg": "content 长度需在 4~200 字之间"}
     if mem_type not in ("fact", "preference", "habit", "event"):
         mem_type = "fact"
+    if is_system_noise(content):
+        return {"ok": False, "msg": "系统状态/工具报错不属于用户知识，未保存"}
 
     chash = _content_hash(content)
     async with SessionLocal() as db:
@@ -436,13 +460,17 @@ async def search_memories(user_id: int, query: str, limit: int = 5) -> tuple[lis
             .limit(200)
         )
         candidates = list((await db.execute(stmt)).scalars().all())
+        coverage: dict[int, float] = {}
         if query:
-            hits = [m for m in candidates if query in m.content]
-            if not hits:
-                hits = [
-                    m for m in candidates
-                    if any(w and w in m.content for w in query.split())
-                ]
+            words = [w for w in query.split() if w] or [query]
+            hits = []
+            for m in candidates:
+                hit = sum(1 for w in words if w in m.content)
+                if hit == 0:
+                    continue  # 零命中不返回（M1 相关性纪律）
+                coverage[id(m)] = hit / len(words)
+                hits.append(m)
+            hits.sort(key=lambda m: (-coverage[id(m)], -m.source_count))
         else:
             hits = candidates
 
@@ -456,6 +484,7 @@ async def search_memories(user_id: int, query: str, limit: int = 5) -> tuple[lis
                 "type": m.mem_type,
                 "confidence": round(m.confidence, 2),
                 "source_count": m.source_count,
+                "relevance": round(coverage.get(id(m), 1.0), 2),
             }
             for m in hits[:limit]
         ], (profile.profile_md[:600] if profile else "")

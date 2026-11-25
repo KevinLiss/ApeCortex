@@ -195,7 +195,7 @@ async function handleReview(row: any, approve: boolean) {
     ElMessage.success(t('knowledge.promotions.reviewDone'))
     fetchAll()
   } catch (e: any) {
-    ElMessage.error(e?.response?.data?.msg || e?.message || 'Error')
+    /* 错误提示由 request 拦截器统一展示（含可读化文案） */
   }
 }
 
