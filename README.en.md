@@ -21,7 +21,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-2.11.0-blue" alt="version">
+  <img src="https://img.shields.io/badge/version-2.12.0-blue" alt="version">
   <img src="https://img.shields.io/badge/python-3.11%2B-orange" alt="python">
   <img src="https://img.shields.io/badge/vue-3.5-brightgreen" alt="vue">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="license">
@@ -99,9 +99,9 @@ Built-in MCP tools:
 - **Function Calling** — AI can invoke MCP tools to perform admin operations, up to 5 rounds of tool-call loops
 - **Key management** — manage AI provider keys in the admin panel, encrypted at rest with Fernet (key derived from JWT_SECRET)
 
-### Knowledge Base Plugin (knowledge_base)
+### ApeCortex (knowledge_base)
 
-Built-in plugin that turns chat into a knowledge pipeline — memory capture, LLM Wiki compilation, a shared public library, and web/academic research:
+**ApeCortex = Ape (ApeAdmin) + Cortex** — the knowledge cortex for ApeAdmin. Built-in plugin that turns chat into a knowledge pipeline — memory capture, LLM Wiki compilation, a shared public library, and web/academic research:
 
 - **Automatic memory capture (P0)** — after each chat turn, a background job extracts durable facts / preferences / habits (single ADD-only LLM pass, MD5 dedup, evidence-based reinforcement)
 - **Bi-temporal memory model (P0)** — validity axis (``valid_at`` / ``invalid_at``) plus system transaction axis; stale preferences are invalidated, never deleted
@@ -456,6 +456,7 @@ Contributions are welcome!
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| v2.12.0 | 2026-11-25 | ApeCortex M1 (quality & trust): zero-hit retrieval no longer returns fallback noise and results carry ``relevance``; memory extraction rejects system/tool-error statements; frontend error hinting (404 → backend not restarted) + block-level degradation; plugin 0.3.0 |
 | v2.11.0 | 2026-11-25 | Knowledge base plugin P1–P3: LLM Wiki compilation (dedup prefilter / Map-Reduce / STORM citations / wikilinks), private spaces + public library with PR-style promotion (frozen snapshot / gate / provenance), dual-channel retrieval with SQL-level isolation, web collection (3-layer switch + SSRF/robots guards + optional crawl4ai rendering), three academic sources, trimmed STORM deep research with circuit breakers, task hub + six pages, 8 MCP tools, public-library leaderboard; APP_VERSION bumped to 2.11.0, both READMEs synced |
 | v2.10.0 | 2026-11-24 | Knowledge base plugin P0: chat memory capture, user profile, ``kb_save``/``kb_query`` MCP tools, profile page; host adds ``chat_message_complete`` event and runtime ``user`` injection for MCP tools; proxy normalization (``proxy_compat``) + ``trust_env=False`` on outbound calls; MySQL password URL escaping; branded setup-wizard icon; chat failure guidance dialog |
 | v2.9.1 | 2026-11-24 | Security fix batch: logout now revokes the companion refresh token; server-side arithmetic captcha for login (``login_captcha_enabled`` switch, off by default); plaintext "remember password" removed; layer-4 data scope (Role.data_scope) live on the user list; Alembic migration files tracked in git + idempotent 0001 + migration discipline doc; 401 deep-route redirect fix; admin_path configurable at build time (``VITE_ADMIN_BASE``) |

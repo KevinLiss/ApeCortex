@@ -30,7 +30,7 @@ async def seed_knowledge_base_data(db: AsyncSession) -> None:
     parent = result.scalars().first()
     if not parent:
         parent = Menu(
-            name="AI 知识库",
+            name="ApeCortex",
             parent_id=0,
             type="M",
             path="/knowledge-base",
@@ -44,29 +44,29 @@ async def seed_knowledge_base_data(db: AsyncSession) -> None:
         )
         db.add(parent)
         await db.flush()
-        logger.info("Created 'AI 知识库' top-level menu")
+        logger.info("Created 'ApeCortex' top-level menu")
 
     # ── 2. 子菜单 + 按钮权限（P1 扩容）─────────────────
     # (name, parent_name, type, path, component, permission, icon, sort, i18n_key)
     menu_specs = [
-        ("知识空间", "AI 知识库", "C", "spaces", "knowledge_base/spaces/index",
+        ("知识空间", None, "C", "spaces", "knowledge_base/spaces/index",
          "knowledge_base:space:list", "Folder", 1, "menu.kb.spaces"),
         ("新建空间", "知识空间", "F", None, None, "knowledge_base:space:create", None, 1, None),
-        ("词条管理", "AI 知识库", "C", "pages", "knowledge_base/pages/index",
+        ("词条管理", None, "C", "pages", "knowledge_base/pages/index",
          "knowledge_base:page:list", "Document", 2, "menu.kb.pages"),
         ("发布词条", "词条管理", "F", None, None, "knowledge_base:page:publish", None, 1, None),
         ("编辑词条", "词条管理", "F", None, None, "knowledge_base:page:edit", None, 2, None),
-        ("晋升审核", "AI 知识库", "C", "promotions", "knowledge_base/promotions/index",
+        ("晋升审核", None, "C", "promotions", "knowledge_base/promotions/index",
          "knowledge_base:promotion:review", "Stamp", 3, "menu.kb.promotions"),
         ("提交晋升", "晋升审核", "F", None, None, "knowledge_base:promotion:submit", None, 1, None),
         ("审核晋升", "晋升审核", "F", None, None, "knowledge_base:promotion:review", None, 2, None),
-        ("任务中心", "AI 知识库", "C", "tasks", "knowledge_base/tasks/index",
+        ("任务中心", None, "C", "tasks", "knowledge_base/tasks/index",
          "knowledge_base:task:list", "Timer", 4, "menu.kb.tasks"),
         ("重试任务", "任务中心", "F", None, None, "knowledge_base:task:retry", None, 1, None),
-        ("插件设置", "AI 知识库", "C", "settings", "knowledge_base/settings/index",
+        ("插件设置", None, "C", "settings", "knowledge_base/settings/index",
          "knowledge_base:setting:read", "Setting", 6, "menu.kb.settings"),
         ("保存设置", "插件设置", "F", None, None, "knowledge_base:setting:update", None, 1, None),
-        ("记忆画像", "AI 知识库", "C", "profile", "knowledge_base/profile/index",
+        ("记忆画像", None, "C", "profile", "knowledge_base/profile/index",
          "knowledge_base:profile:list", "User", 5, "menu.kb.profile"),
         ("查询记忆", "记忆画像", "F", None, None, "knowledge_base:profile:list", None, 1, None),
         ("删除记忆", "记忆画像", "F", None, None, "knowledge_base:profile:delete", None, 2, None),
@@ -77,8 +77,9 @@ async def seed_knowledge_base_data(db: AsyncSession) -> None:
 
     created_menus: list[Menu] = []
     for name, parent_name, mtype, path, component, permission, icon, sort, i18n_key in menu_specs:
+        target_name = parent_name or parent.name  # None = 挂到顶级目录下（品牌名随库而定）
         parent_menu = next(
-            (m for m in existing + created_menus if m.name == parent_name), None
+            (m for m in existing + created_menus if m.name == target_name), None
         )
         if not parent_menu:
             logger.warning(f"Skip menu '{name}': parent '{parent_name}' not found")

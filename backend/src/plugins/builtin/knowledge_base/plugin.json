@@ -1,8 +1,8 @@
 {
   "name": "knowledge_base",
-  "display_name": "AI 知识库",
-  "version": "0.2.0",
-  "description": "把聊天沉淀、LLM Wiki 编译、公开库协作与联网调研串成一条知识生产流水线：记忆自动提取与画像（P0）、词条编译＋私有空间＋公开库晋升流＋双通道召回（P1）、联网采集＋学术三源＋深度调研（P2）、渲染通道＋贡献榜（P3）。",
+  "display_name": "ApeCortex",
+  "version": "0.3.0",
+  "description": "ApeCortex——给 ApeAdmin 装上知识大脑皮层：聊天记忆沉淀与画像、LLM Wiki 编译、私有/公开空间与 PR 式晋升、双通道召回、联网采集与学术深度调研、MCP 知识接口。",
   "author": "ApeAdmin",
   "dependencies": []
 }
