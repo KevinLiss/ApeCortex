@@ -119,4 +119,94 @@ def register_knowledge_base_mcp_tools() -> None:
         handler=_kb_compile,
         plugin_name="knowledge_base",
     )
-    logger.info("Registered 4 knowledge_base MCP tools (kb_save/kb_query/kb_ingest/kb_compile)")
+    # ---- P2：联网采集（网页抓取工具默认注册，运行时校验用户开关；学术源公开元数据直接注册）----
+    mcp_manager.register_tool(
+        name="kb_collect_web",
+        description="抓取一个网页抽取正文为 Markdown（需要用户在知识库设置中开启联网开关）",
+        handler=_kb_collect_web,
+        plugin_name="knowledge_base",
+    )
+    mcp_manager.register_tool(
+        name="kb_collect_arxiv",
+        description="检索 arXiv 论文元数据（标题/作者/摘要/PDF链接）",
+        handler=_kb_collect_arxiv,
+        plugin_name="knowledge_base",
+    )
+    mcp_manager.register_tool(
+        name="kb_collect_openalex",
+        description="检索 OpenAlex 学术文献（跨库元数据：DOI/引用数/摘要）",
+        handler=_kb_collect_openalex,
+        plugin_name="knowledge_base",
+    )
+    mcp_manager.register_tool(
+        name="kb_research",
+        description="发起深度调研任务：规划大纲→检索学术文献→撰写带引用报告→草稿词条（人工确认后发布）",
+        handler=_kb_research,
+        plugin_name="knowledge_base",
+    )
+    logger.info("Registered 8 knowledge_base MCP tools (P0×2 + P1×2 + P2×4)")
+
+
+async def _kb_collect_web(url: str, user: User | None = None) -> str:
+    """抓取一个网页，抽取正文为 Markdown（联网功能，需在知识库设置中开启联网开关）。
+
+    Args:
+        url: 目标网页地址（http/https）
+        user: 运行时注入的当前用户（勿在调用时传入）
+    """
+    if user is None:
+        return json.dumps({"ok": False, "msg": "缺少用户上下文"}, ensure_ascii=False)
+    from src.plugins.builtin.knowledge_base.collector.web import (
+        fetch_page, get_domain_allowlist, get_web_enabled,
+    )
+    if not await get_web_enabled(user.id):
+        return json.dumps({"ok": False, "msg": "联网开关未开启（知识库设置）"}, ensure_ascii=False)
+    allow = await get_domain_allowlist(user.id)
+    result = await fetch_page(url, extra_allow=allow)
+    return json.dumps(result, ensure_ascii=False)
+
+
+async def _kb_collect_arxiv(query: str, max_results: int = 5, user: User | None = None) -> str:
+    """检索 arXiv 论文（标题/作者/摘要/PDF链接，无需联网开关——学术 API 公开元数据）。
+
+    Args:
+        query: 检索词（英文效果最佳）
+        max_results: 返回条数（默认5，最大10）
+        user: 运行时注入的当前用户（勿在调用时传入）
+    """
+    from src.plugins.builtin.knowledge_base.collector.academic import search_arxiv
+    results = await search_arxiv(query, max_results)
+    return json.dumps({"ok": not results or "error" not in results[0], "results": results[:max_results]}, ensure_ascii=False)
+
+
+async def _kb_collect_openalex(query: str, max_results: int = 5, user: User | None = None) -> str:
+    """检索 OpenAlex 学术文献（跨库元数据：DOI/引用数/年份/摘要）。
+
+    Args:
+        query: 检索词
+        max_results: 返回条数（默认5，最大10）
+        user: 运行时注入的当前用户（勿在调用时传入）
+    """
+    from src.plugins.builtin.knowledge_base.collector.academic import search_openalex
+    results = await search_openalex(query, max_results)
+    return json.dumps({"ok": not results or "error" not in results[0], "results": results[:max_results]}, ensure_ascii=False)
+
+
+async def _kb_research(topic: str, space_id: int = 0, user: User | None = None) -> str:
+    """发起一次深度调研任务：AI 规划大纲→检索学术文献→撰写带引用的报告→落为草稿词条（需人工确认发布）。
+
+    Args:
+        topic: 调研主题（如"RAG 与长上下文的取舍"）
+        space_id: 目标空间ID（0=默认空间）
+        user: 运行时注入的当前用户（勿在调用时传入）
+    """
+    if user is None:
+        return json.dumps({"ok": False, "msg": "缺少用户上下文"}, ensure_ascii=False)
+    from src.plugins.builtin.knowledge_base.pipeline.ingest_api import get_or_create_default_space
+    from src.plugins.builtin.knowledge_base.pipeline.jobs import enqueue_job
+    if not space_id:
+        space_id = await get_or_create_default_space(user.id)
+    job_id = await enqueue_job(
+        user.id, "research", {"topic": topic, "space_id": space_id}, space_id=space_id,
+    )
+    return json.dumps({"ok": True, "job_id": job_id, "msg": "调研任务已入队，完成后在任务中心/词条页查看草稿"}, ensure_ascii=False)

@@ -80,6 +80,7 @@
     "spaces": "知识空间",
     "pages": "词条管理",
     "promotions": "晋升审核",
-    "tasks": "任务中心"
+    "tasks": "任务中心",
+    "settings": "插件设置"
   }
 }

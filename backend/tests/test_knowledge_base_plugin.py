@@ -583,3 +583,69 @@ async def test_ingest_rejects_short(wiki_env):
 
     r = await ingest_api.ingest_doc(1, 0, "t", "短", "upload")
     assert not r["ok"]
+
+
+# =================================================================
+# P2：联网采集护栏 + 学术源 + 调研管线
+# =================================================================
+
+async def test_ssrf_blocked():
+    from src.plugins.builtin.knowledge_base.collector import web as web_collector
+    # 本地地址直接命中私网
+    ok, msg = web_collector.check_ssrf("http://127.0.0.1:8000/x")
+    assert not ok and "私网" in msg
+    ok, _ = web_collector.check_ssrf("http://localhost/x")
+    assert not ok
+
+
+async def test_domain_allowlist():
+    from src.plugins.builtin.knowledge_base.collector import web as web_collector
+    # 空白名单=不限制
+    ok, _ = web_collector.check_domain("https://example.com/a", [])
+    assert ok
+    # 命中
+    ok, _ = web_collector.check_domain("https://docs.python.org/3/", ["python.org"])
+    assert ok
+    # 未命中
+    ok, msg = web_collector.check_domain("https://evil.com/x", ["python.org"])
+    assert not ok and "白名单" in msg
+
+
+async def test_fetch_page_rejects_bad_url():
+    from src.plugins.builtin.knowledge_base.collector import web as web_collector
+    r = await web_collector.fetch_page("ftp://example.com/x")
+    assert not r["ok"] and "http" in r["msg"]
+    r2 = await web_collector.fetch_page("http://127.0.0.1:1/x")  # SSRF 拦截在请求前
+    assert not r2["ok"] and "SSRF" in r2["msg"]
+
+
+async def test_web_default_off(kb_env, monkeypatch):
+    import src.db as db_mod
+    monkeypatch.setattr(db_mod, "SessionLocal", kb_env)
+    from src.plugins.builtin.knowledge_base.collector import web as web_collector
+    assert await web_collector.get_web_enabled(1) is False  # 默认关
+    await web_collector.set_web_enabled(1, True)
+    assert await web_collector.get_web_enabled(1) is True
+
+
+async def test_arxiv_search_mock(monkeypatch):
+    from src.plugins.builtin.knowledge_base.collector import academic
+
+    def fake_sync():
+        return [{
+            "source": "arxiv", "id": "2401.00001", "title": "Test Paper",
+            "authors": ["A"], "abstract": "abs", "url": "https://arxiv.org/abs/2401.00001",
+        }]
+    async def fake_to_thread(fn, *a, **k):
+        return fake_sync()
+    monkeypatch.setattr(asyncio, "to_thread", fake_to_thread)
+    results = await academic.search_arxiv("test query", 2)
+    assert len(results) == 1 and results[0]["title"] == "Test Paper"
+
+
+async def test_research_outline_parse():
+    from src.plugins.builtin.knowledge_base.pipeline import research as r
+    outline = r._parse_outline('{"title": "T", "sections": [{"heading": "H1", "search_query": "q1"}]}')
+    assert outline is not None and outline["sections"][0]["heading"] == "H1"
+    assert r._parse_outline("not json") is None
+    assert r._parse_outline('{"sections": []}') is None

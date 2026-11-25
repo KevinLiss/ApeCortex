@@ -1,0 +1,220 @@
+<template>
+  <div class="kb-settings-page">
+    <div class="page-header">
+      <div>
+        <h2>{{ t('knowledge.settings.title') }}</h2>
+        <p class="text-muted">{{ t('knowledge.settings.subtitle') }}</p>
+      </div>
+    </div>
+
+    <el-row :gutter="16">
+      <el-col :xs="24" :md="12">
+        <el-card shadow="never" class="panel">
+          <template #header>
+            <div class="panel-header">
+              <el-icon class="panel-icon"><Connection /></el-icon>
+              <span>{{ t('knowledge.settings.webTitle') }}</span>
+            </div>
+          </template>
+          <p class="card-desc">{{ t('knowledge.settings.webDesc') }}</p>
+          <div class="switch-line">
+            <span>{{ t('knowledge.settings.webEnable') }}</span>
+            <el-switch v-model="webEnabled" @change="onSwitch" />
+          </div>
+          <div class="dom-box">
+            <div class="dom-title">{{ t('knowledge.settings.domainAllow') }}</div>
+            <div v-for="(d, i) in domainAllow" :key="i" class="dom-row">
+              <el-tag closable effect="plain" round @close="domainAllow.splice(i, 1)">{{ d }}</el-tag>
+            </div>
+            <div class="dom-add">
+              <el-input v-model="newDomain" style="width: 240px" placeholder="example.com" @keyup.enter="addDomain" />
+              <el-button size="small" @click="addDomain">{{ t('knowledge.settings.addDomain') }}</el-button>
+            </div>
+          </div>
+          <div class="save-line">
+            <el-button type="primary" :loading="saving" @click="save" v-permission="'knowledge_base:setting:update'">
+              {{ t('knowledge.settings.save') }}
+            </el-button>
+          </div>
+        </el-card>
+      </el-col>
+
+      <el-col :xs="24" :md="12">
+        <el-card shadow="never" class="panel">
+          <template #header>
+            <div class="panel-header">
+              <el-icon class="panel-icon"><Reading /></el-icon>
+              <span>{{ t('knowledge.settings.acTitle') }}</span>
+            </div>
+          </template>
+          <p class="card-desc">{{ t('knowledge.settings.acDesc') }}</p>
+          <div class="src-list">
+            <div class="src-row"><span class="src-name">arXiv</span><el-tag size="small" type="success" effect="plain" round>always on</el-tag></div>
+            <div class="src-row"><span class="src-name">OpenAlex</span><el-tag size="small" type="success" effect="plain" round>always on</el-tag></div>
+            <div class="src-row"><span class="src-name">Semantic Scholar</span><el-tag size="small" type="success" effect="plain" round>always on</el-tag></div>
+          </div>
+          <el-alert :title="t('knowledge.settings.privacy')" type="info" :closable="false" show-icon class="privacy" />
+        </el-card>
+      </el-col>
+    </el-row>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { onMounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Connection, Reading } from '@element-plus/icons-vue'
+
+import { getKbWebSettings, putKbWebSettings } from '@/api'
+
+const { t } = useI18n()
+
+const webEnabled = ref(false)
+const domainAllow = ref<string[]>([])
+const newDomain = ref('')
+const saving = ref(false)
+let confirmed = false
+
+async function fetchSettings() {
+  try {
+    const res: any = await getKbWebSettings()
+    webEnabled.value = !!res?.web_enabled
+    domainAllow.value = res?.domain_allow ?? []
+    confirmed = webEnabled.value
+  } catch (e: any) {
+    ElMessage.error(e?.message || 'load failed')
+  }
+}
+
+async function onSwitch(val: boolean) {
+  if (val && !confirmed) {
+    try {
+      await ElMessageBox.confirm(t('knowledge.settings.webConfirm'), '', { type: 'warning' })
+      confirmed = true
+    } catch {
+      webEnabled.value = false
+      return
+    }
+  }
+}
+
+function addDomain() {
+  const d = newDomain.value.trim().toLowerCase()
+  if (!d || domainAllow.value.includes(d)) return
+  domainAllow.value.push(d)
+  newDomain.value = ''
+}
+
+async function save() {
+  saving.value = true
+  try {
+    await putKbWebSettings({
+      web_enabled: webEnabled.value,
+      domain_allow: domainAllow.value,
+      confirm: true,
+    })
+    ElMessage.success(t('knowledge.settings.saved'))
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.msg || e?.message || 'Error')
+  } finally {
+    saving.value = false
+  }
+}
+
+onMounted(fetchSettings)
+</script>
+
+<style scoped>
+.page-header {
+  margin-bottom: 20px;
+}
+
+.page-header h2 {
+  margin: 0 0 4px;
+  font-size: 20px;
+}
+
+.panel {
+  border-radius: 10px;
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+
+.panel-icon {
+  color: var(--el-color-primary);
+}
+
+.card-desc {
+  margin: 4px 0 16px;
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+  line-height: 1.6;
+}
+
+.switch-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--el-fill-color-light);
+  margin-bottom: 14px;
+}
+
+.dom-box {
+  margin-top: 8px;
+}
+
+.dom-title {
+  font-size: 13px;
+  margin-bottom: 8px;
+  color: var(--el-text-color-secondary);
+}
+
+.dom-row {
+  display: inline-flex;
+  margin: 0 8px 8px 0;
+}
+
+.dom-add {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.save-line {
+  margin-top: 12px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.src-list {
+  margin-top: 8px;
+}
+
+.src-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--el-fill-color-light);
+  margin-bottom: 8px;
+}
+
+.src-name {
+  font-size: 13px;
+  font-weight: 500;
+  font-family: monospace;
+}
+
+.privacy {
+  margin-top: 14px;
+}
+</style>

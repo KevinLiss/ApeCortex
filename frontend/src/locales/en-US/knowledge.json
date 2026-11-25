@@ -162,5 +162,20 @@
     "retried": "Re-enqueued",
     "empty": "No tasks",
     "autoRefresh": "Auto refresh"
+  },
+  "settings": {
+    "title": "Settings",
+    "subtitle": "Web collection & privacy",
+    "webTitle": "Web Collection",
+    "webDesc": "When enabled the AI assistant can fetch web pages to enrich the knowledge base (data leaves to target sites)",
+    "webEnable": "Enable web",
+    "webConfirm": "Enable web collection? Data will be sent to allowed sites.",
+    "domainAllow": "Domain allowlist (empty = no restriction, SSRF guard only)",
+    "addDomain": "Add domain",
+    "save": "Save",
+    "saved": "Saved",
+    "acTitle": "Academic Search",
+    "acDesc": "arXiv / OpenAlex / Semantic Scholar are public metadata APIs, no toggle needed",
+    "privacy": "Memories and profiles are visible only to you"
   }
 }

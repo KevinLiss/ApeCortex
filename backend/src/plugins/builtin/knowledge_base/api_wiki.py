@@ -392,3 +392,69 @@ async def retry_job(
         payload = json.loads(orig.payload or "{}") if orig else {}
     new_id = await enqueue_job(user.id, detail["job_type"], payload, detail.get("space_id"))
     return success_response(data={"job_id": new_id}, msg="已重新入队")
+
+
+# ---------------------------------------------------------------- 设置（P2：联网开关）
+
+@router.get("/settings/web")
+async def get_web_settings(
+    user: Annotated[User, Depends(get_current_user)],
+    _perm: Annotated[User, Depends(_require_perm("knowledge_base:setting:read"))],
+):
+    """联网采集设置（开关 + 域名白名单）。"""
+    from src.plugins.builtin.knowledge_base.collector.web import (
+        get_domain_allowlist,
+        get_web_enabled,
+    )
+    return success_response(data={
+        "web_enabled": await get_web_enabled(user.id),
+        "domain_allow": await get_domain_allowlist(user.id),
+    })
+
+
+@router.put("/settings/web")
+async def put_web_settings(
+    body: dict,
+    user: Annotated[User, Depends(get_current_user)],
+    _perm: Annotated[User, Depends(_require_perm("knowledge_base:setting:update"))],
+):
+    """更新联网设置。
+
+    .. warning:: 开启联网=数据外发。body: {web_enabled: bool, domain_allow: [str]}
+    """
+    from src.plugins.builtin.knowledge_base.collector.web import (
+        get_domain_allowlist,
+        set_web_enabled,
+    )
+    from src.plugins.builtin.knowledge_base.models import KbSetting
+    from src.db import SessionLocal
+    import json
+
+    enable = bool(body.get("web_enabled"))
+    if enable and not body.get("confirm"):  # 开启需显式确认（数据外发）
+        raise HTTPException(status_code=400, detail="开启联网会外发数据，请传 confirm=true 显式确认")
+    await set_web_enabled(user.id, enable)
+
+    allow = body.get("domain_allow")
+    if isinstance(allow, list):
+        cleaned = [str(a).strip().lower()[:100] for a in allow if str(a).strip()][:50]
+        async with SessionLocal() as db:
+            from sqlalchemy import select
+            row = (
+                await db.execute(
+                    select(KbSetting).where(
+                        KbSetting.user_id == user.id, KbSetting.key == "web_domain_allow"
+                    )
+                )
+            ).scalars().first()
+            value = json.dumps(cleaned, ensure_ascii=False)
+            if row is None:
+                db.add(KbSetting(user_id=user.id, key="web_domain_allow", value=value))
+            else:
+                row.value = value
+            await db.commit()
+
+    return success_response(data={
+        "web_enabled": enable,
+        "domain_allow": await get_domain_allowlist(user.id),
+    })

@@ -121,6 +121,21 @@ async def _execute(job_id: int) -> None:
             result = await compile_space(space_id, doc_ids)
             if result.get("llm_calls"):
                 await _bump_llm_calls(job_id, result["llm_calls"])
+        elif job_type == "research":
+            from src.plugins.builtin.knowledge_base.pipeline.research import run_research
+
+            async def _cb(step: str, pct: int) -> None:
+                await _update_job(job_id, step=step, progress=pct)
+
+            result = await run_research(
+                user_id=user_id,
+                space_id=payload.get("space_id") or 0,
+                topic=payload.get("topic", ""),
+                progress_cb=_cb,
+            )
+            if result.get("llm_calls"):
+                await _bump_llm_calls(job_id, result["llm_calls"])
+            result.pop("outline", None)  # 大纲不进 result（体积）
         elif job_type == "memory_extract":
             from src.plugins.builtin.knowledge_base.pipeline.memory import extract_and_store
             inserted = await extract_and_store(

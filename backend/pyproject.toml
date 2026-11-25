@@ -24,6 +24,10 @@ dependencies = [
     "redis>=8.1.0",
     "orjson>=3.12.0",
     "psutil>=7.2.0",
+    # knowledge_base 插件：联网采集与学术检索
+    "trafilatura>=2.0.0",
+    "arxiv>=4.0.0",
+    "pyalex>=0.15.0",
 ]
 
 [project.optional-dependencies]
