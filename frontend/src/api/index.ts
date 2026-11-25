@@ -311,3 +311,12 @@ export const retryKbJob = (id: number) => request.post(`/knowledge-base/jobs/${i
 export const getKbWebSettings = () => request.get('/knowledge-base/settings/web')
 export const putKbWebSettings = (data: any) => request.put('/knowledge-base/settings/web', data)
 export const getKbContributions = () => request.get('/knowledge-base/contributions')
+
+// ---- Knowledge Base M3：共享成员 / 待发布 / 只读凭证 ----
+export const getKbSpaceMembers = (spaceId: number) => request.get(`/knowledge-base/spaces/${spaceId}/members`)
+export const addKbSpaceMember = (spaceId: number, data: any) => request.post(`/knowledge-base/spaces/${spaceId}/members`, data)
+export const removeKbSpaceMember = (spaceId: number, userId: number) => request.delete(`/knowledge-base/spaces/${spaceId}/members/${userId}`)
+export const getKbPendingPublish = () => request.get('/knowledge-base/promotions/pending-publish')
+export const getKbPublicKeys = () => request.get('/knowledge-base/public-keys')
+export const createKbPublicKey = (data: any) => request.post('/knowledge-base/public-keys', data)
+export const deleteKbPublicKey = (id: number) => request.delete(`/knowledge-base/public-keys/${id}`)

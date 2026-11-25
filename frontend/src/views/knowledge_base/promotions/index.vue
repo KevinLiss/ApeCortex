@@ -62,6 +62,27 @@
           </template>
         </el-table>
       </el-tab-pane>
+
+      <el-tab-pane v-if="canPublish" :label="t('knowledge.promotions.tabPending')" name="pending">
+        <p class="pending-tip text-muted">{{ t('knowledge.promotions.pendingTip') }}</p>
+        <el-table :data="pendingItems" v-loading="pendingLoading" stripe>
+          <el-table-column prop="title" :label="t('knowledge.promotions.colTitle')" min-width="200" show-overflow-tooltip />
+          <el-table-column prop="space_name" :label="t('knowledge.promotions.colSpace')" width="160" show-overflow-tooltip />
+          <el-table-column :label="t('knowledge.promotions.colSubmitter')" width="100" align="center">
+            <template #default="{ row }">#{{ row.origin_author_id }}</template>
+          </el-table-column>
+          <el-table-column :label="t('knowledge.promotions.colActions')" width="120" fixed="right" align="center">
+            <template #default="{ row }">
+              <el-button link size="small" type="success" @click="handlePublishPending(row)">
+                {{ t('knowledge.promotions.pendingPublish') }}
+              </el-button>
+            </template>
+          </el-table-column>
+          <template #empty>
+            <el-empty :description="t('knowledge.promotions.pendingEmpty')" :image-size="72" />
+          </template>
+        </el-table>
+      </el-tab-pane>
     </el-tabs>
 
     <!-- 公开库贡献榜 -->
@@ -110,13 +131,14 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 
-import { getKbPromotions, getMyKbPromotions, reviewKbPromotion, getKbContributions } from '@/api'
+import { getKbPromotions, getMyKbPromotions, reviewKbPromotion, getKbContributions, getKbPendingPublish, publishKbPage } from '@/api'
+import { useUserStore } from '@/stores/user'
 
 const { t } = useI18n()
 
@@ -127,6 +149,10 @@ const reviewItems = ref<any[]>([])
 const myItems = ref<any[]>([])
 const contribBoard = ref<any[]>([])
 const contribMine = ref<any>({ approved: 0, pending: 0 })
+const pendingItems = ref<any[]>([])
+const pendingLoading = ref(false)
+const userStore = useUserStore()
+const canPublish = computed(() => userStore.hasPermission('knowledge_base:page:publish'))
 const snapshotVisible = ref(false)
 const snapshotHtml = ref('')
 
@@ -153,6 +179,24 @@ async function fetchAll() {
   } finally {
     loading.value = false
   }
+}
+
+async function fetchPending() {
+  pendingLoading.value = true
+  try {
+    const res: any = await getKbPendingPublish()
+    pendingItems.value = res?.items ?? []
+  } catch { /* 拦截器已提示 */ } finally {
+    pendingLoading.value = false
+  }
+}
+
+async function handlePublishPending(row: any) {
+  try {
+    await publishKbPage(row.id, 'live')
+    ElMessage.success(t('knowledge.promotions.pendingPublished'))
+    fetchPending()
+  } catch { /* 拦截器已提示 */ }
 }
 
 async function fetchContrib() {
@@ -202,10 +246,16 @@ async function handleReview(row: any, approve: boolean) {
 onMounted(() => {
   fetchAll()
   fetchContrib()
+  if (canPublish.value) fetchPending()
 })
 </script>
 
 <style scoped>
+.pending-tip {
+  margin: 0 0 10px;
+  font-size: 12px;
+}
+
 .self-review-hint {
   font-size: 12px;
   color: var(--el-text-color-secondary);

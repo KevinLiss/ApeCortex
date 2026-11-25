@@ -753,3 +753,79 @@ async def test_save_explicit_rejects_noise(kb_env):
     assert r["ok"] is False
     r2 = await memory_pipeline.save_explicit(1, "用户偏好用中文回复", "preference")
     assert r2["ok"] is True
+
+
+# ---------------------------------------------------------------- M3: 共享空间 ACL
+async def test_shared_space_member_acl(wiki_env):
+    """共享空间：成员可召回，非成员零召回；reader 不可写、writer 可写。"""
+    from src.plugins.builtin.knowledge_base.models import KbSpaceMember
+    from src.plugins.builtin.knowledge_base.pipeline import ingest_api as ingest
+    from src.plugins.builtin.knowledge_base.pipeline import retrieval as r
+
+    async with wiki_env() as db:
+        db.add(KbSpace(owner_user_id=1, name="团队库", visibility="shared"))
+        await db.commit()
+        space = (await db.execute(select(KbSpace))).scalars().first()
+        db.add(KbWikiPage(space_id=space.id, slug="team-rule", title="团队规范",
+            body_md="团队规范：所有提交需经过双人评审", status="live",
+            confidence=0.9, source_count=3))
+        db.add(KbSpaceMember(space_id=space.id, user_id=2, role="reader"))
+        db.add(KbSpaceMember(space_id=space.id, user_id=3, role="writer"))
+        await db.commit()
+        space_id = space.id
+
+    assert await ingest.get_space_role(2, space_id) == "reader"
+    assert await ingest.get_space_role(3, space_id) == "writer"
+    assert await ingest.get_space_role(4, space_id) is None
+
+    ok, _ = await ingest.ensure_space_access(2, space_id, need_write=True)
+    assert ok is False
+    ok, _ = await ingest.ensure_space_access(3, space_id, need_write=True)
+    assert ok is True
+
+    out2 = await r.search_all(2, "团队规范")
+    assert any(p["slug"] == "team-rule" for p in out2["shared_pages"])
+    out4 = await r.search_all(4, "团队规范")
+    assert out4["shared_pages"] == []  # 非成员无共享通道召回路径
+
+
+# ---------------------------------------------------------------- M3: 公开库只读出口
+def test_public_key_rate_limit():
+    from src.plugins.builtin.knowledge_base import api_public as pub
+
+    pub._hits.clear()
+    assert all(pub._rate_ok(99) for _ in range(pub._RATE_LIMIT))
+    assert pub._rate_ok(99) is False  # 第 11 次触发限流
+    pub._hits.clear()
+
+
+def test_public_key_hash_stable():
+    from src.plugins.builtin.knowledge_base import api_public as pub
+
+    assert pub.hash_key("kbp_demo") == pub.hash_key("kbp_demo")
+    assert pub.hash_key("kbp_demo") != pub.hash_key("kbp_demo2")
+    assert len(pub.hash_key("x")) == 64
+
+
+# ---------------------------------------------------------------- M3: 自审开关
+async def test_self_review_blocked_by_default(wiki_env):
+    from src.plugins.builtin.knowledge_base.pipeline import compiler as c
+
+    async with wiki_env() as db:
+        db.add(KbSpace(owner_user_id=1, name="私库", visibility="private"))
+        db.add(KbSpace(owner_user_id=1, name="公开库", visibility="public"))
+        await db.commit()
+        spaces = list((await db.execute(select(KbSpace))).scalars().all())
+        private = next(s for s in spaces if s.visibility == "private")
+        public = next(s for s in spaces if s.visibility == "public")
+        db.add(KbWikiPage(space_id=private.id, slug="promo-me", title="可晋升词条",
+            body_md="内容足够长用于晋升快照" * 3, status="draft",
+            confidence=0.9, source_count=3))
+        await db.commit()
+        page = (await db.execute(select(KbWikiPage))).scalars().first()
+        page_id, public_id = page.id, public.id
+
+    sub = await c.submit_promotion(page_id, user_id=1, target_space_id=public_id, submit_note="自审测试")
+    assert sub["ok"] is True
+    res = await c.review_promotion(sub["promotion_id"], reviewer_id=1, approve=True)
+    assert res["ok"] is False and "自己" in res["msg"]

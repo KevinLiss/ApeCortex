@@ -20,8 +20,10 @@
             <div class="space-icon"><el-icon :size="20"><Folder /></el-icon></div>
             <div class="space-meta">
               <div class="space-name">{{ s.name }}</div>
-              <el-tag size="small" :type="s.visibility === 'public' ? 'success' : 'info'" effect="plain" round>
-                {{ s.visibility === 'public' ? t('knowledge.spaces.publicTag') : t('knowledge.spaces.privateTag') }}
+              <el-tag size="small" :type="s.visibility === 'public' ? 'success' : s.visibility === 'shared' ? 'warning' : 'info'" effect="plain" round>
+                {{ s.visibility === 'public' ? t('knowledge.spaces.publicTag')
+                  : s.visibility === 'shared' ? t('knowledge.spaces.sharedTag')
+                  : t('knowledge.spaces.privateTag') }}
               </el-tag>
             </div>
           </div>
@@ -31,6 +33,9 @@
             <el-button size="small" type="primary" plain round @click.stop="openUpload(s)">
               {{ t('knowledge.spaces.uploadDoc') }}
             </el-button>
+            <el-button v-if="s.visibility === 'shared'" size="small" plain round @click.stop="openMembers(s)">
+              {{ t('knowledge.spaces.members') }}
+            </el-button>
           </div>
         </el-card>
       </el-col>
@@ -38,6 +43,26 @@
         <el-card shadow="never" class="empty-card">
           <div class="empty-title">{{ t('knowledge.spaces.empty') }}</div>
           <div class="empty-desc">{{ t('knowledge.spaces.emptyDesc') }}</div>
+        </el-card>
+      </el-col>
+    </el-row>
+
+    <!-- 共享空间（他人共享给我） -->
+    <div class="group-title" v-if="sharedSpaces.length">{{ t('knowledge.spaces.sharedGroup') }}</div>
+    <el-row :gutter="16" v-if="sharedSpaces.length">
+      <el-col v-for="s in sharedSpaces" :key="s.id" :xs="24" :sm="12" :md="8" :lg="6">
+        <el-card shadow="hover" class="space-card" @click="openPages(s)">
+          <div class="space-head">
+            <div class="space-icon"><el-icon :size="20"><Folder /></el-icon></div>
+            <div class="space-meta">
+              <div class="space-name">{{ s.name }}</div>
+              <el-tag size="small" type="warning" effect="plain" round>{{ t('knowledge.spaces.sharedTag') }}</el-tag>
+            </div>
+          </div>
+          <div class="space-desc">{{ s.description || '—' }}</div>
+          <div class="space-footer">
+            <span class="stat"><el-icon><Document /></el-icon>{{ s.page_count }} {{ t('knowledge.spaces.pages') }}</span>
+          </div>
         </el-card>
       </el-col>
     </el-row>
@@ -77,6 +102,7 @@
         <el-form-item v-if="canCreatePublic" :label="t('knowledge.spaces.visibility')">
           <el-radio-group v-model="newVisibility">
             <el-radio label="private">{{ t('knowledge.spaces.visibilityPrivate') }}</el-radio>
+            <el-radio label="shared">{{ t('knowledge.spaces.visibilityShared') }}</el-radio>
             <el-radio label="public">{{ t('knowledge.spaces.visibilityPublic') }}</el-radio>
           </el-radio-group>
           <div v-if="newVisibility === 'public'" class="visibility-hint">
@@ -110,6 +136,37 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <!-- 成员管理（共享空间） -->
+    <el-dialog v-model="membersVisible" :title="t('knowledge.spaces.membersTitle')" width="520px">
+      <div class="member-add">
+        <el-input v-model="newMemberId" style="width: 160px" :placeholder="t('knowledge.spaces.memberId')" />
+        <el-select v-model="newMemberRole" style="width: 120px">
+          <el-option :label="t('knowledge.spaces.roleReader')" value="reader" />
+          <el-option :label="t('knowledge.spaces.roleWriter')" value="writer" />
+        </el-select>
+        <el-button size="small" type="primary" @click="handleAddMember">{{ t('knowledge.spaces.addMember') }}</el-button>
+      </div>
+      <el-table :data="members" v-loading="membersLoading" size="small">
+        <el-table-column prop="name" :label="t('knowledge.spaces.memberName')" min-width="140" />
+        <el-table-column :label="t('knowledge.spaces.memberRole')" width="100" align="center">
+          <template #default="{ row }">
+            <el-tag size="small" :type="row.role === 'writer' ? 'warning' : 'info'" effect="plain" round>
+              {{ row.role === 'writer' ? t('knowledge.spaces.roleWriter') : t('knowledge.spaces.roleReader') }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column :label="t('knowledge.spaces.memberActions')" width="90" align="center">
+          <template #default="{ row }">
+            <el-button link size="small" type="danger" @click="handleRemoveMember(row)">{{ t('common.action.delete') }}</el-button>
+          </template>
+        </el-table-column>
+        <template #empty>
+          <el-empty :description="t('knowledge.spaces.memberEmpty')" :image-size="60" />
+        </template>
+      </el-table>
+      <p class="member-tip">{{ t('knowledge.spaces.memberTip') }}</p>
+    </el-dialog>
   </div>
 </template>
 
@@ -120,7 +177,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Collection, Document, Folder, Plus } from '@element-plus/icons-vue'
 
-import { createKbSpace, getKbSpaces, uploadKbDoc } from '@/api'
+import { addKbSpaceMember, createKbSpace, getKbSpaceMembers, getKbSpaces, removeKbSpaceMember, uploadKbDoc } from '@/api'
 import { useUserStore } from '@/stores/user'
 
 const { t } = useI18n()
@@ -139,8 +196,15 @@ const docTitle = ref('')
 const docContent = ref('')
 const docUrl = ref('')
 const uploading = ref(false)
+const membersVisible = ref(false)
+const membersLoading = ref(false)
+const members = ref<any[]>([])
+const memberSpace = ref<any>(null)
+const newMemberId = ref('')
+const newMemberRole = ref('reader')
 
 const ownedSpaces = computed(() => spaces.value.filter((s) => s.owned && s.visibility !== 'public'))
+const sharedSpaces = computed(() => spaces.value.filter((s) => !s.owned && s.visibility === 'shared'))
 const publicSpaces = computed(() => spaces.value.filter((s) => s.visibility === 'public'))
 const canCreatePublic = computed(() => userStore.hasPermission('knowledge_base:promotion:review'))
 
@@ -183,6 +247,47 @@ async function handleCreate() {
   }
 }
 
+async function openMembers(space: any) {
+  memberSpace.value = space
+  membersVisible.value = true
+  newMemberId.value = ''
+  newMemberRole.value = 'reader'
+  fetchMembers()
+}
+
+async function fetchMembers() {
+  if (!memberSpace.value) return
+  membersLoading.value = true
+  try {
+    const res: any = await getKbSpaceMembers(memberSpace.value.id)
+    members.value = res?.items ?? []
+  } catch { /* 拦截器已提示 */ } finally {
+    membersLoading.value = false
+  }
+}
+
+async function handleAddMember() {
+  if (!memberSpace.value || !newMemberId.value.trim()) return
+  try {
+    await addKbSpaceMember(memberSpace.value.id, {
+      user_id: Number(newMemberId.value.trim()),
+      role: newMemberRole.value,
+    })
+    ElMessage.success(t('knowledge.spaces.memberSaved'))
+    newMemberId.value = ''
+    fetchMembers()
+  } catch { /* 拦截器已提示 */ }
+}
+
+async function handleRemoveMember(row: any) {
+  if (!memberSpace.value) return
+  try {
+    await removeKbSpaceMember(memberSpace.value.id, row.user_id)
+    ElMessage.success(t('knowledge.spaces.memberRemoved'))
+    fetchMembers()
+  } catch { /* 拦截器已提示 */ }
+}
+
 async function handleUpload() {
   if (!uploadSpace.value) return
   if (!docTitle.value.trim() || docContent.value.trim().length < 40) {
@@ -211,6 +316,19 @@ onMounted(fetchSpaces)
 </script>
 
 <style scoped>
+.member-add {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.member-tip {
+  margin: 12px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--el-text-color-secondary);
+}
+
 .visibility-hint {
   margin-top: 6px;
   font-size: 12px;

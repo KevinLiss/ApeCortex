@@ -42,9 +42,12 @@ async def search_all(
 ) -> dict:
     """双通道检索：私有词条 + 公开词条 + 记忆（记忆复用 memory.search_memories）。
 
-    返回 {"private_pages": [...], "public_pages": [...], "memories": [...], "profile_excerpt": str}
+    返回 {"private_pages": [...], "shared_pages": [...], "public_pages": [...],
+          "memories": [...], "profile_excerpt": str}
+
+    M3 三通道：私有（owner 硬过滤）→ 共享（成员连接过滤）→ 公开（live-only）。
     """
-    from src.plugins.builtin.knowledge_base.models import KbSpace, KbWikiPage
+    from src.plugins.builtin.knowledge_base.models import KbSpace, KbSpaceMember, KbWikiPage
     from src.plugins.builtin.knowledge_base.pipeline.memory import search_memories
 
     q = query.strip()
@@ -92,6 +95,24 @@ async def search_all(
         ).all())
         public_pages = [(p, {"id": p.space_id, "name": name, "visibility": vis}) for p, name, vis in public_rows]
 
+        # 共享空间（M3）：仅成员可见——成员关系在 SQL 层连接，非成员无召回路径
+        shared_rows = list((
+            await db.execute(
+                select(KbWikiPage, KbSpace.name, KbSpace.visibility)
+                .join(KbSpace, KbWikiPage.space_id == KbSpace.id)
+                .join(KbSpaceMember, KbSpaceMember.space_id == KbSpace.id)
+                .where(
+                    KbSpaceMember.user_id == user_id,
+                    KbSpace.visibility == "shared",
+                    KbSpace.status == "active",
+                    KbWikiPage.is_deleted == False,  # noqa: E712
+                )
+                .order_by(KbWikiPage.source_count.desc(), KbWikiPage.updated_at.desc())
+                .limit(200)
+            )
+        ).all())
+        shared_pages = [(p, {"id": p.space_id, "name": name, "visibility": vis}) for p, name, vis in shared_rows]
+
         def _fmt(p: KbWikiPage, space: dict) -> dict:
             return {
                 "id": p.id, "slug": p.slug, "title": p.title,
@@ -122,12 +143,14 @@ async def search_all(
             return out
 
         private_out = _rank(private_pages, 1.0)
+        shared_out = _rank(shared_pages, 0.95)
         public_out = _rank(public_pages, 0.9)
 
     memories, profile_excerpt = await search_memories(user_id, q, limit)
 
     return {
         "private_pages": private_out,
+        "shared_pages": shared_out,
         "public_pages": public_out,
         "memories": memories,
         "profile_excerpt": profile_excerpt,

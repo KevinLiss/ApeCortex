@@ -28,10 +28,10 @@ async def _kb_save(content: str, mem_type: str = "fact", user: User | None = Non
 
 
 async def _kb_query(query: str = "", limit: int = 5, user: User | None = None) -> str:
-    """检索当前用户的记忆、私有知识库词条与公开知识库词条（三类背景信息一次拿全）。
+    """检索当前用户的记忆、私有/共享/公开知识库词条（背景信息一次拿全）。
 
     回复用户问题前先调用本工具，可获得：用户个人记忆/画像、
-    用户私有 Wiki 词条、全员共享的公开 Wiki 词条。
+    私有 Wiki 词条、成员共享 Wiki 词条、公开 Wiki 词条（均带 relevance 与来源标注）。
 
     Args:
         query: 检索关键词（为空则返回高置信度摘要）

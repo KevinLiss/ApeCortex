@@ -57,6 +57,38 @@
         </el-card>
       </el-col>
     </el-row>
+
+    <el-card shadow="never" class="panel keys-panel">
+      <template #header>
+        <div class="panel-header">
+          <el-icon class="panel-icon"><Key /></el-icon>
+          <span>{{ t('knowledge.settings.keysTitle') }}</span>
+        </div>
+      </template>
+      <p class="card-desc">{{ t('knowledge.settings.keysDesc') }}</p>
+      <div class="dom-add">
+        <el-input v-model="newKeyName" style="width: 240px" :placeholder="t('knowledge.settings.keyName')" maxlength="100" />
+        <el-button size="small" type="primary" :loading="creatingKey" @click="handleCreateKey" v-permission="'knowledge_base:setting:update'">
+          {{ t('knowledge.settings.keyCreate') }}
+        </el-button>
+      </div>
+      <el-table :data="keys" v-loading="keysLoading" size="small" class="keys-table">
+        <el-table-column prop="name" :label="t('knowledge.settings.keyName')" min-width="160" />
+        <el-table-column prop="request_count" :label="t('knowledge.settings.keyCount')" width="100" align="center" />
+        <el-table-column :label="t('knowledge.settings.keyLastUsed')" width="180" align="center">
+          <template #default="{ row }">{{ row.last_used_at ? row.last_used_at.replace('T', ' ').slice(0, 19) : '—' }}</template>
+        </el-table-column>
+        <el-table-column :label="t('knowledge.settings.keyActions')" width="90" align="center">
+          <template #default="{ row }">
+            <el-button link size="small" type="danger" @click="handleRevokeKey(row)">{{ t('knowledge.settings.keyRevoke') }}</el-button>
+          </template>
+        </el-table-column>
+        <template #empty>
+          <el-empty :description="t('knowledge.settings.keyEmpty')" :image-size="60" />
+        </template>
+      </el-table>
+      <p class="key-hint">{{ t('knowledge.settings.keyHint') }}</p>
+    </el-card>
   </div>
 </template>
 
@@ -64,9 +96,9 @@
 import { onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Connection, Reading } from '@element-plus/icons-vue'
+import { Connection, Key, Reading } from '@element-plus/icons-vue'
 
-import { getKbWebSettings, putKbWebSettings } from '@/api'
+import { createKbPublicKey, deleteKbPublicKey, getKbPublicKeys, getKbWebSettings, putKbWebSettings } from '@/api'
 
 const { t } = useI18n()
 
@@ -74,6 +106,10 @@ const webEnabled = ref(false)
 const domainAllow = ref<string[]>([])
 const newDomain = ref('')
 const saving = ref(false)
+const keys = ref<any[]>([])
+const keysLoading = ref(false)
+const creatingKey = ref(false)
+const newKeyName = ref('')
 let confirmed = false
 
 async function fetchSettings() {
@@ -122,10 +158,67 @@ async function save() {
   }
 }
 
-onMounted(fetchSettings)
+async function fetchKeys() {
+  keysLoading.value = true
+  try {
+    const res: any = await getKbPublicKeys()
+    keys.value = res?.items ?? []
+  } catch { /* 拦截器已提示 */ } finally {
+    keysLoading.value = false
+  }
+}
+
+async function handleCreateKey() {
+  if (!newKeyName.value.trim()) return
+  creatingKey.value = true
+  try {
+    const res: any = await createKbPublicKey({ name: newKeyName.value.trim() })
+    newKeyName.value = ''
+    await fetchKeys()
+    if (res?.key) {
+      await ElMessageBox.alert(res.key, t('knowledge.settings.keyCreated'), {
+        confirmButtonText: t('common.action.confirm'),
+        customClass: 'key-reveal-box',
+      })
+    }
+  } catch { /* 拦截器已提示 */ } finally {
+    creatingKey.value = false
+  }
+}
+
+async function handleRevokeKey(row: any) {
+  try {
+    await ElMessageBox.confirm(`${t('knowledge.settings.keyRevoke')} ${row.name}?`, '', { type: 'warning' })
+  } catch { return }
+  try {
+    await deleteKbPublicKey(row.id)
+    ElMessage.success(t('knowledge.settings.keyRevoked'))
+    fetchKeys()
+  } catch { /* 拦截器已提示 */ }
+}
+
+onMounted(() => {
+  fetchSettings()
+  fetchKeys()
+})
 </script>
 
 <style scoped>
+.keys-panel {
+  margin-top: 16px;
+}
+
+.keys-table {
+  margin-top: 12px;
+}
+
+.key-hint {
+  margin: 12px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--el-text-color-secondary);
+}
+
 .page-header {
   margin-bottom: 20px;
 }

@@ -31,13 +31,12 @@ class KnowledgeBasePlugin(PluginInterface):
     """AI 知识库插件——聊天知识自动沉淀与用户画像。"""
 
     name = "knowledge_base"
-    display_name = "AI 知识库"
+    display_name = "ApeCortex"
     description = (
-        "聊天知识自动沉淀与用户画像：对话完成后自动提取值得记忆的事实与偏好"
-        "（单次 LLM 提取 + MD5 去重强化），形成个人画像；AI 助手可经 MCP 工具 "
-        "kb_save / kb_query 主动存取。"
+        "ApeCortex——给 ApeAdmin 装上知识大脑皮层：聊天记忆沉淀与画像、LLM Wiki 编译、"
+        "私有/共享/公开空间与 PR 式晋升、三通道召回、联网采集与学术深度调研、MCP 知识接口。"
     )
-    version = "0.1.0"
+    version = "0.3.0"
     author = "ApeAdmin"
 
     # ── 生命周期：安装（建表 + seed）──────────────────
@@ -95,10 +94,12 @@ class KnowledgeBasePlugin(PluginInterface):
     # ── 生命周期：注册路由 + 事件 ──────────────────────
     def register(self, app: FastAPI) -> None:
         from src.plugins.builtin.knowledge_base.api import router
+        from src.plugins.builtin.knowledge_base.api_public import router as public_router
         from src.plugins.builtin.knowledge_base.api_wiki import router as wiki_router
 
         app.include_router(router, prefix=settings.API_PREFIX)
         app.include_router(wiki_router, prefix=settings.API_PREFIX)
+        app.include_router(public_router, prefix=settings.API_PREFIX)
 
         # 订阅聊天完成事件 → 后台记忆提取（handler 内部 spawn 任务，快速返回）
         event_bus.on(

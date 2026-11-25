@@ -426,6 +426,7 @@ async def review_promotion(
     """审核晋升：批准=快照复制入公开库（draft 态，溯源字段三连），拒绝=留意见。"""
     from src.plugins.builtin.knowledge_base.models import (
         KbPromotion,
+        KbSetting,
         KbSpace,
         KbWikiPage,
         KbWikiRevision,
@@ -436,7 +437,15 @@ async def review_promotion(
         if promo is None or promo.status != "submitted":
             return {"ok": False, "msg": "申请不存在或不在待审状态"}
         if promo.submitted_by == reviewer_id:
-            return {"ok": False, "msg": "不能审核自己提交的晋升申请，请由其他维护者复核"}
+            # 自审策略可配置（kb_setting.promote_allow_self_review，默认 false）
+            setting = (await db.execute(
+                select(KbSetting).where(
+                    KbSetting.key == "promote_allow_self_review", KbSetting.user_id == 0
+                )
+            )).scalars().first()
+            allowed = bool(setting and str(setting.value).strip().lower() in ("true", "1", '"true"'))
+            if not allowed:
+                return {"ok": False, "msg": "不能审核自己提交的晋升申请，请由其他维护者复核"}
 
         if not approve:
             promo.status = "rejected"

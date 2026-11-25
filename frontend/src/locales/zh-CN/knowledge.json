@@ -45,7 +45,7 @@
   },
   "spaces": {
     "title": "知识空间",
-    "subtitle": "你的私有知识库与全员共享的公开知识库",
+    "subtitle": "你的私有知识库、团队共享库与全员公开库",
     "create": "新建空间",
     "name": "空间名称",
     "desc": "空间描述",
@@ -72,7 +72,23 @@
     "visibilityPublic": "公开（全员可读）",
     "visibilityPublicHint": "公开空间的词条全员可检索；发布需维护者发布为 live。创建公开库需维护者权限。",
     "created": "空间已创建",
-    "needDoc": "请填写标题，正文至少 40 字"
+    "needDoc": "请填写标题，正文至少 40 字",
+    "visibilityShared": "共享（成员可访问）",
+    "sharedGroup": "共享空间",
+    "sharedTag": "共享",
+    "members": "成员",
+    "membersTitle": "空间成员",
+    "memberId": "用户 ID",
+    "memberName": "成员",
+    "memberRole": "角色",
+    "memberActions": "操作",
+    "roleReader": "只读",
+    "roleWriter": "可写",
+    "addMember": "添加成员",
+    "memberEmpty": "暂无成员",
+    "memberTip": "输入用户的数字 ID 添加成员：只读成员可浏览并被 AI 召回，可写成员还能上传文档与编辑词条。",
+    "memberSaved": "成员已保存",
+    "memberRemoved": "成员已移除"
   },
   "pages": {
     "title": "词条管理",
@@ -147,7 +163,13 @@
     "snapshot": "提交快照（冻结）",
     "approved": "已批准并发布为草稿",
     "reviewDone": "审核完成",
-    "selfReviewBlocked": "自己的申请需他人复核"
+    "selfReviewBlocked": "自己的申请需他人复核",
+    "tabPending": "待发布",
+    "pendingEmpty": "没有待发布的词条",
+    "pendingPublish": "发布",
+    "pendingPublished": "已发布为 live",
+    "pendingTip": "晋升批准后词条先落草稿，需由公开空间维护者发布为 live 才会被召回。",
+    "colSpace": "空间"
   },
   "tasks": {
     "title": "任务中心",
@@ -187,7 +209,19 @@
     "saved": "设置已保存",
     "acTitle": "学术检索",
     "acDesc": "arXiv / OpenAlex / Semantic Scholar 为公开元数据接口，无需开关",
-    "privacy": "记忆与画像数据仅本人可见；沉淀开关可在画像页控制"
+    "privacy": "记忆与画像数据仅本人可见；沉淀开关可在画像页控制",
+    "keysTitle": "公开库只读凭证",
+    "keysDesc": "供外部 AI 或站点只读访问已发布的公开词条（不含草稿与私有内容）",
+    "keyName": "凭证名称",
+    "keyCreate": "创建凭证",
+    "keyCreated": "凭证已创建，请立即保存（只显示一次）",
+    "keyEmpty": "暂无凭证",
+    "keyCount": "调用次数",
+    "keyLastUsed": "最近使用",
+    "keyRevoke": "吊销",
+    "keyRevoked": "凭证已吊销",
+    "keyHint": "使用方式：GET /api/v1/knowledge-base/public/search?q=关键词，请求头 X-Kb-Key: <凭证>；每凭证限流 10 次/分钟。",
+    "keyActions": "操作"
   },
   "contributions": {
     "title": "公开库贡献榜",

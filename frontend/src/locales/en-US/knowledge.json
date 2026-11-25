@@ -45,7 +45,7 @@
   },
   "spaces": {
     "title": "Knowledge Spaces",
-    "subtitle": "Your private knowledge bases and the shared public library",
+    "subtitle": "Your private library, team-shared spaces and the public library",
     "create": "New Space",
     "name": "Space name",
     "desc": "Description",
@@ -72,7 +72,23 @@
     "visibilityPublic": "Public (readable by all)",
     "visibilityPublicHint": "Pages in a public space are searchable by everyone; a maintainer publishes them to live. Creating a public space requires maintainer permission.",
     "created": "Space created",
-    "needDoc": "Title is required and the body needs at least 40 characters"
+    "needDoc": "Title is required and the body needs at least 40 characters",
+    "visibilityShared": "Shared (members only)",
+    "sharedGroup": "Shared with me",
+    "sharedTag": "Shared",
+    "members": "Members",
+    "membersTitle": "Space members",
+    "memberId": "User ID",
+    "memberName": "Member",
+    "memberRole": "Role",
+    "memberActions": "Actions",
+    "roleReader": "Reader",
+    "roleWriter": "Writer",
+    "addMember": "Add member",
+    "memberEmpty": "No members yet",
+    "memberTip": "Enter a numeric user ID to add a member: readers can browse and are recalled by AI; writers can also upload docs and edit pages.",
+    "memberSaved": "Member saved",
+    "memberRemoved": "Member removed"
   },
   "pages": {
     "title": "Wiki Pages",
@@ -147,7 +163,13 @@
     "snapshot": "Submitted snapshot (frozen)",
     "approved": "Approved and published as draft",
     "reviewDone": "Review done",
-    "selfReviewBlocked": "Your own request needs another reviewer"
+    "selfReviewBlocked": "Your own request needs another reviewer",
+    "tabPending": "Awaiting publish",
+    "pendingEmpty": "Nothing to publish",
+    "pendingPublish": "Publish",
+    "pendingPublished": "Published live",
+    "pendingTip": "Approved promotions land as drafts; a public-space maintainer must publish them to live before they can be recalled.",
+    "colSpace": "Space"
   },
   "tasks": {
     "title": "Task Center",
@@ -187,7 +209,19 @@
     "saved": "Saved",
     "acTitle": "Academic Search",
     "acDesc": "arXiv / OpenAlex / Semantic Scholar are public metadata APIs, no toggle needed",
-    "privacy": "Memories and profiles are visible only to you"
+    "privacy": "Memories and profiles are visible only to you",
+    "keysTitle": "Public read-only keys",
+    "keysDesc": "Let external AI or sites read published public pages only (no drafts, no private content)",
+    "keyName": "Key name",
+    "keyCreate": "Create key",
+    "keyCreated": "Key created — save it now (shown once)",
+    "keyEmpty": "No keys yet",
+    "keyCount": "Requests",
+    "keyLastUsed": "Last used",
+    "keyRevoke": "Revoke",
+    "keyRevoked": "Key revoked",
+    "keyHint": "Usage: GET /api/v1/knowledge-base/public/search?q=... with header X-Kb-Key: <key>; 10 requests/min per key.",
+    "keyActions": "Actions"
   },
   "contributions": {
     "title": "Public Library Leaderboard",

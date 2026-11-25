@@ -12,7 +12,7 @@
 """
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.models.mixins import IDMixin, TimestampMixin
@@ -104,7 +104,8 @@ class KbProfile(IDMixin, TimestampMixin, PluginBase):
 # ==========================================================================
 
 # 空间可见性
-SPACE_VISIBILITY = ("private", "public")  # shared 留 P3（成员 ACL）
+SPACE_VISIBILITY = ("private", "shared", "public")  # shared = 成员 ACL（M3）
+SPACE_MEMBER_ROLES = ("reader", "writer")
 # 词条状态：candidate 候选（晋升门槛未满足）→ draft 草稿 → live 已发布 → archived
 PAGE_STATUS = ("candidate", "draft", "live", "archived")
 # 晋升申请状态
@@ -117,6 +118,7 @@ class KbSpace(IDMixin, TimestampMixin, PluginBase):
     """知识库空间（P1）。
 
     - private 空间：owner 可读写，AI 召回仅限 owner（行级隔离与记忆层同纪律）
+    - shared 空间：成员可读，writer 可写；非成员不可见（SQL 层成员连接过滤）
     - public 空间：全员可读（AI 双通道召回），写入仅限晋升流或空间维护者（API 硬校验）
     - owner_user_id 语义自 user_id（规划 10.2 节）
     """
@@ -132,7 +134,7 @@ class KbSpace(IDMixin, TimestampMixin, PluginBase):
     )
     visibility: Mapped[str] = mapped_column(
         String(20), nullable=False, default="private", index=True,
-        comment="可见性: private=私有 public=公开（shared 留 P3）",
+        comment="可见性: private=私有 shared=成员共享 public=公开",
     )
     page_count: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, comment="词条计数（冗余，展示用）"
@@ -350,6 +352,55 @@ class KbJob(IDMixin, TimestampMixin, PluginBase):
 
     def __repr__(self) -> str:
         return f"<KbJob {self.id} {self.job_type} {self.status}>"
+
+
+class KbSpaceMember(IDMixin, TimestampMixin, PluginBase):
+    """共享空间成员（M3）：reader 只读，writer 可写入（owner 隐式拥有全部权限，不占表行）。"""
+
+    __tablename__ = "kb_space_member"
+    __table_args__ = (UniqueConstraint("space_id", "user_id", name="uq_kb_space_member"),)
+
+    space_id: Mapped[int] = mapped_column(
+        Integer, nullable=False, index=True, comment="空间 ID"
+    )
+    user_id: Mapped[int] = mapped_column(
+        Integer, nullable=False, index=True, comment="成员用户 ID"
+    )
+    role: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="reader", comment="reader=只读 writer=可写"
+    )
+
+    def __repr__(self) -> str:
+        return f"<KbSpaceMember space={self.space_id} user={self.user_id} role={self.role}>"
+
+
+class KbPublicKey(IDMixin, TimestampMixin, PluginBase):
+    """公开库只读访问凭证（M3）：外部 AI 只读公开 live 词条，不触碰任何私有/共享内容。
+
+    仅存 hash，明文只在创建时返回一次。
+    """
+
+    __tablename__ = "kb_public_key"
+
+    name: Mapped[str] = mapped_column(String(100), nullable=False, comment="凭证名称")
+    key_hash: Mapped[str] = mapped_column(
+        String(64), nullable=False, index=True, comment="sha256(明文 key)"
+    )
+    enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, comment="是否启用"
+    )
+    created_by: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, comment="创建人"
+    )
+    request_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, comment="累计请求数（审计）"
+    )
+    last_used_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, comment="最近使用时间"
+    )
+
+    def __repr__(self) -> str:
+        return f"<KbPublicKey {self.id} {self.name} enabled={self.enabled}>"
 
 
 class KbSetting(IDMixin, TimestampMixin, PluginBase):
