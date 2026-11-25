@@ -28,10 +28,38 @@ async def enqueue_job(
     payload: dict[str, Any] | None = None,
     space_id: int | None = None,
 ) -> int:
-    """入队一个任务，返回 job_id（页面/MCP 调用后轮询用）。"""
-    from src.plugins.builtin.knowledge_base.models import KbJob
+    """入队一个任务，返回 job_id（页面/MCP 调用后轮询用）。
+
+    成本护栏（M5）：``kb_setting.daily_job_limit``（user_id=0，0=不限）限制单用户当日任务数，
+    超限抛 ``RuntimeError``（调用方转 429/友好提示）。
+    """
+    from datetime import datetime, time, timezone
+
+    from sqlalchemy import func
+
+    from src.plugins.builtin.knowledge_base.models import KbJob, KbSetting
 
     async with SessionLocal() as db:
+        limit_row = (await db.execute(
+            select(KbSetting).where(
+                KbSetting.key == "daily_job_limit", KbSetting.user_id == 0
+            )
+        )).scalars().first()
+        try:
+            daily_limit = int(str(limit_row.value).strip()) if limit_row else 0
+        except ValueError:
+            daily_limit = 0
+        if daily_limit > 0:
+            day_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+            used = (await db.execute(
+                select(func.count()).select_from(KbJob).where(
+                    KbJob.user_id == user_id,
+                    KbJob.created_at >= day_start,
+                )
+            )).scalar_one()
+            if used >= daily_limit:
+                raise RuntimeError(f"今日任务已达上限（{used}/{daily_limit}），请明日再试或在设置中调整")
+
         job = KbJob(
             user_id=user_id,
             space_id=space_id,

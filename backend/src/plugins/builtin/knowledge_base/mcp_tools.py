@@ -87,7 +87,10 @@ async def _kb_compile(space_id: int, user: User | None = None) -> str:
         return json.dumps({"ok": False, "msg": msg}, ensure_ascii=False)
     from src.plugins.builtin.knowledge_base.pipeline.jobs import enqueue_job
 
-    job_id = await enqueue_job(user.id, "wiki_ingest", {"space_id": space_id}, space_id=space_id)
+    try:
+        job_id = await enqueue_job(user.id, "wiki_ingest", {"space_id": space_id}, space_id=space_id)
+    except RuntimeError as exc:  # 成本护栏：当日任务超限
+        return json.dumps({"ok": False, "msg": str(exc)}, ensure_ascii=False)
     return json.dumps({"ok": True, "job_id": job_id, "msg": "编译任务已入队"}, ensure_ascii=False)
 
 
@@ -206,7 +209,10 @@ async def _kb_research(topic: str, space_id: int = 0, user: User | None = None) 
     from src.plugins.builtin.knowledge_base.pipeline.jobs import enqueue_job
     if not space_id:
         space_id = await get_or_create_default_space(user.id)
-    job_id = await enqueue_job(
-        user.id, "research", {"topic": topic, "space_id": space_id}, space_id=space_id,
-    )
+    try:
+        job_id = await enqueue_job(
+            user.id, "research", {"topic": topic, "space_id": space_id}, space_id=space_id,
+        )
+    except RuntimeError as exc:  # 成本护栏：当日任务超限
+        return json.dumps({"ok": False, "msg": str(exc)}, ensure_ascii=False)
     return json.dumps({"ok": True, "job_id": job_id, "msg": "调研任务已入队，完成后在任务中心/词条页查看草稿"}, ensure_ascii=False)

@@ -34,9 +34,10 @@ class KnowledgeBasePlugin(PluginInterface):
     display_name = "ApeCortex"
     description = (
         "ApeCortex——给 ApeAdmin 装上知识大脑皮层：聊天记忆沉淀与画像、LLM Wiki 编译、"
-        "私有/共享/公开空间与 PR 式晋升、三通道召回、联网采集与学术深度调研、MCP 知识接口。"
+        "私有/共享/公开空间与 PR 式晋升、三通道召回、联网采集与学术深度调研、"
+        "公开库只读出口与 MCP 知识接口。"
     )
-    version = "0.3.0"
+    version = "0.4.0"
     author = "ApeAdmin"
 
     # ── 生命周期：安装（建表 + seed）──────────────────

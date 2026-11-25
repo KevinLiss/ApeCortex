@@ -152,11 +152,14 @@ async def ingest_doc(
     if compile_now:
         from src.plugins.builtin.knowledge_base.pipeline.jobs import enqueue_job
 
-        job_id = await enqueue_job(
-            user_id, "wiki_ingest", {"space_id": space_id, "doc_ids": [doc_id]}, space_id=space_id
-        )
-        result["job_id"] = job_id
-        result["msg"] = "已入库，编译任务已入队"
+        try:
+            job_id = await enqueue_job(
+                user_id, "wiki_ingest", {"space_id": space_id, "doc_ids": [doc_id]}, space_id=space_id
+            )
+            result["job_id"] = job_id
+            result["msg"] = "已入库，编译任务已入队"
+        except RuntimeError as exc:  # 成本护栏：当日任务超限
+            result["msg"] = f"已入库，但编译未入队：{exc}"
     return result
 
 

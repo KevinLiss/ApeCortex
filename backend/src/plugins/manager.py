@@ -929,8 +929,10 @@ class PluginManager:
             with zipfile.ZipFile(zip_path, "r") as zf:
                 names = [name for name in zf.namelist() if name and not name.endswith("/")]
                 first_parts = {name.split("/", 1)[0] for name in names}
-                has_root = len(first_parts) == 1 and all("/" in name for name in names)
-                root = next(iter(first_parts)) + "/" if has_root else ""
+                single = next(iter(first_parts)) if len(first_parts) == 1 else None
+                # 单顶层目录需不是插件包目录本身，否则会把 knowledge_base/ 当成外层壳剥掉
+                has_root = bool(single) and single != plugin_name and all("/" in name for name in names)
+                root = f"{single}/" if has_root else ""
                 for name in names:
                     relative = name[len(root):] if root and name.startswith(root) else name
                     destination = (staging / relative).resolve()
