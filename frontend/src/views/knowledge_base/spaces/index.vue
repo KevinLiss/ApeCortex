@@ -20,7 +20,9 @@
             <div class="space-icon"><el-icon :size="20"><Folder /></el-icon></div>
             <div class="space-meta">
               <div class="space-name">{{ s.name }}</div>
-              <el-tag size="small" type="info" effect="plain" round>{{ t('knowledge.spaces.privateTag') }}</el-tag>
+              <el-tag size="small" :type="s.visibility === 'public' ? 'success' : 'info'" effect="plain" round>
+                {{ s.visibility === 'public' ? t('knowledge.spaces.publicTag') : t('knowledge.spaces.privateTag') }}
+              </el-tag>
             </div>
           </div>
           <div class="space-desc">{{ s.description || '—' }}</div>
@@ -55,6 +57,9 @@
           <div class="space-desc">{{ s.description || '—' }}</div>
           <div class="space-footer">
             <span class="stat"><el-icon><Document /></el-icon>{{ s.page_count }} {{ t('knowledge.spaces.pages') }}</span>
+            <el-button v-if="s.owned" size="small" type="primary" plain round @click.stop="openUpload(s)">
+              {{ t('knowledge.spaces.uploadDoc') }}
+            </el-button>
           </div>
         </el-card>
       </el-col>
@@ -68,6 +73,15 @@
         </el-form-item>
         <el-form-item :label="t('knowledge.spaces.desc')">
           <el-input v-model="newDesc" type="textarea" :rows="2" :placeholder="t('knowledge.spaces.descPlaceholder')" maxlength="500" />
+        </el-form-item>
+        <el-form-item v-if="canCreatePublic" :label="t('knowledge.spaces.visibility')">
+          <el-radio-group v-model="newVisibility">
+            <el-radio label="private">{{ t('knowledge.spaces.visibilityPrivate') }}</el-radio>
+            <el-radio label="public">{{ t('knowledge.spaces.visibilityPublic') }}</el-radio>
+          </el-radio-group>
+          <div v-if="newVisibility === 'public'" class="visibility-hint">
+            {{ t('knowledge.spaces.visibilityPublicHint') }}
+          </div>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -107,14 +121,17 @@ import { ElMessage } from 'element-plus'
 import { Collection, Document, Folder, Plus } from '@element-plus/icons-vue'
 
 import { createKbSpace, getKbSpaces, uploadKbDoc } from '@/api'
+import { useUserStore } from '@/stores/user'
 
 const { t } = useI18n()
 const router = useRouter()
+const userStore = useUserStore()
 
 const spaces = ref<any[]>([])
 const createVisible = ref(false)
 const newName = ref('')
 const newDesc = ref('')
+const newVisibility = ref('private')
 const creating = ref(false)
 const uploadVisible = ref(false)
 const uploadSpace = ref<any>(null)
@@ -123,8 +140,9 @@ const docContent = ref('')
 const docUrl = ref('')
 const uploading = ref(false)
 
-const ownedSpaces = computed(() => spaces.value.filter((s) => s.owned))
-const publicSpaces = computed(() => spaces.value.filter((s) => !s.owned && s.visibility === 'public'))
+const ownedSpaces = computed(() => spaces.value.filter((s) => s.owned && s.visibility !== 'public'))
+const publicSpaces = computed(() => spaces.value.filter((s) => s.visibility === 'public'))
+const canCreatePublic = computed(() => userStore.hasPermission('knowledge_base:promotion:review'))
 
 async function fetchSpaces() {
   try {
@@ -151,11 +169,12 @@ async function handleCreate() {
   if (!newName.value.trim()) return
   creating.value = true
   try {
-    await createKbSpace({ name: newName.value.trim(), description: newDesc.value.trim() })
-    ElMessage.success('OK')
+    await createKbSpace({ name: newName.value.trim(), description: newDesc.value.trim(), visibility: newVisibility.value })
+    ElMessage.success(t('knowledge.spaces.created'))
     createVisible.value = false
     newName.value = ''
     newDesc.value = ''
+    newVisibility.value = 'private'
     fetchSpaces()
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.msg || e?.message || 'Error')
@@ -167,7 +186,7 @@ async function handleCreate() {
 async function handleUpload() {
   if (!uploadSpace.value) return
   if (!docTitle.value.trim() || docContent.value.trim().length < 40) {
-    ElMessage.warning(t('knowledge.spaces.noSpaceSelected'))
+    ElMessage.warning(t('knowledge.spaces.needDoc'))
     return
   }
   uploading.value = true
@@ -192,6 +211,13 @@ onMounted(fetchSpaces)
 </script>
 
 <style scoped>
+.visibility-hint {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--el-text-color-secondary);
+}
+
 .page-header {
   display: flex;
   align-items: flex-start;

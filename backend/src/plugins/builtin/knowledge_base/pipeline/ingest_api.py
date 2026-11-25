@@ -123,18 +123,18 @@ async def ingest_doc(
 
 
 async def create_space(user_id: int, name: str, description: str = "", visibility: str = "private") -> dict:
-    """创建空间（visibility 仅 private；public 空间创建走独立管理接口）。"""
+    """创建空间。private 人人可建；public 由路由层做维护者鉴权后传入。"""
     from src.plugins.builtin.knowledge_base.models import KbSpace
 
-    if visibility != "private":
-        return {"ok": False, "msg": "普通用户仅可创建私有空间"}
+    if visibility not in ("private", "public"):
+        return {"ok": False, "msg": "可见性仅支持 private / public"}
     name = name.strip()[:100]
     if len(name) < 1:
         return {"ok": False, "msg": "空间名不能为空"}
     async with SessionLocal() as db:
         space = KbSpace(
             owner_user_id=user_id, name=name,
-            description=(description or "")[:2000], visibility="private",
+            description=(description or "")[:2000], visibility=visibility,
         )
         db.add(space)
         await db.commit()

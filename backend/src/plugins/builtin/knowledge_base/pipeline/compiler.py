@@ -435,6 +435,8 @@ async def review_promotion(
         promo = await db.get(KbPromotion, promotion_id)
         if promo is None or promo.status != "submitted":
             return {"ok": False, "msg": "申请不存在或不在待审状态"}
+        if promo.submitted_by == reviewer_id:
+            return {"ok": False, "msg": "不能审核自己提交的晋升申请，请由其他维护者复核"}
 
         if not approve:
             promo.status = "rejected"

@@ -23,12 +23,17 @@
           <el-table-column :label="t('knowledge.promotions.colActions')" width="200" fixed="right" align="center">
             <template #default="{ row }">
               <el-button link size="small" @click="openSnapshot(row)">{{ t('knowledge.promotions.viewSnapshot') }}</el-button>
-              <el-button v-if="row.status === 'submitted'" link size="small" type="success" @click="handleReview(row, true)">
-                {{ t('knowledge.promotions.approve') }}
-              </el-button>
-              <el-button v-if="row.status === 'submitted'" link size="small" type="danger" @click="handleReview(row, false)">
-                {{ t('knowledge.promotions.reject') }}
-              </el-button>
+              <template v-if="row.status === 'submitted' && row.can_review">
+                <el-button link size="small" type="success" @click="handleReview(row, true)">
+                  {{ t('knowledge.promotions.approve') }}
+                </el-button>
+                <el-button link size="small" type="danger" @click="handleReview(row, false)">
+                  {{ t('knowledge.promotions.reject') }}
+                </el-button>
+              </template>
+              <span v-else-if="row.status === 'submitted'" class="self-review-hint">
+                {{ t('knowledge.promotions.selfReviewBlocked') }}
+              </span>
             </template>
           </el-table-column>
           <template #empty>
@@ -201,6 +206,11 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.self-review-hint {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
 .kb-promotions-page .page-header {
   margin-bottom: 16px;
 }

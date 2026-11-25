@@ -66,7 +66,13 @@
     "uploaded": "Ingested, compilation job started",
     "empty": "No knowledge spaces yet",
     "emptyDesc": "Create a private space to start accumulating knowledge, or ask the AI assistant to create one in chat.",
-    "noSpaceSelected": "Select a space first"
+    "noSpaceSelected": "Select a space first",
+    "visibility": "Space type",
+    "visibilityPrivate": "Private (only me)",
+    "visibilityPublic": "Public (readable by all)",
+    "visibilityPublicHint": "Pages in a public space are searchable by everyone; a maintainer publishes them to live. Creating a public space requires maintainer permission.",
+    "created": "Space created",
+    "needDoc": "Title is required and the body needs at least 40 characters"
   },
   "pages": {
     "title": "Wiki Pages",
@@ -111,7 +117,11 @@
     "promoteNote": "Submit note (why it deserves public)",
     "promoteSubmit": "Submit",
     "promoteGateFail": "Page below promotion gates (sources ≥ 3 and confidence ≥ 0.8)",
-    "promoteSubmitted": "Promotion submitted, awaiting review"
+    "promoteSubmitted": "Promotion submitted, awaiting review",
+    "promoteTargetPlaceholder": "Select a public space",
+    "promoteNoTarget": "No public space yet. Create one in Spaces first (maintainer permission required).",
+    "promoteGateFailDetail": "Promotion gate not met: sources {sources}/3, confidence {confidence}%/80%",
+    "published": "Published"
   },
   "promotions": {
     "title": "Promotion Review",
@@ -136,7 +146,8 @@
     "viewSnapshot": "View snapshot",
     "snapshot": "Submitted snapshot (frozen)",
     "approved": "Approved and published as draft",
-    "reviewDone": "Review done"
+    "reviewDone": "Review done",
+    "selfReviewBlocked": "Your own request needs another reviewer"
   },
   "tasks": {
     "title": "Task Center",

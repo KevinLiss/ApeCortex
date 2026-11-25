@@ -95,7 +95,8 @@ async def fetch_page(
                 return {"ok": False, "msg": "响应过大（>5MB）"}
             html = resp.text
     except httpx.HTTPError as exc:
-        return {"ok": False, "msg": f"抓取失败: {exc}"}
+        detail = str(exc).strip() or type(exc).__name__  # ConnectTimeout 等异常 str 可能为空
+        return {"ok": False, "msg": f"抓取失败: {type(exc).__name__}: {detail}"}
 
     result = _extract_markdown(url, html)
     if not result.get("ok") and render:

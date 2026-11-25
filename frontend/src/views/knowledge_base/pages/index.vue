@@ -113,9 +113,10 @@
     <el-dialog v-model="promoteVisible" :title="t('knowledge.pages.promoteTitle')" width="460px">
       <el-form label-position="top" v-if="selected">
         <el-form-item :label="t('knowledge.pages.promoteTarget')">
-          <el-select v-model="promoteTarget" style="width: 100%">
+          <el-select v-model="promoteTarget" style="width: 100%" :placeholder="t('knowledge.pages.promoteTargetPlaceholder')">
             <el-option v-for="s in publicSpaces" :key="s.id" :value="s.id" :label="s.name" />
           </el-select>
+          <div v-if="!publicSpaces.length" class="promote-empty">{{ t('knowledge.pages.promoteNoTarget') }}</div>
         </el-form-item>
         <el-form-item :label="t('knowledge.pages.promoteNote')">
           <el-input v-model="promoteNote" type="textarea" :rows="3" maxlength="500" />
@@ -123,7 +124,7 @@
       </el-form>
       <template #footer>
         <el-button @click="promoteVisible = false">{{ t('common.action.cancel') }}</el-button>
-        <el-button type="primary" @click="handlePromote">{{ t('knowledge.pages.promoteSubmit') }}</el-button>
+        <el-button type="primary" :disabled="!promoteTarget" @click="handlePromote">{{ t('knowledge.pages.promoteSubmit') }}</el-button>
       </template>
     </el-dialog>
   </div>
@@ -172,8 +173,8 @@ const statusTabs = computed(() => [
 const currentSpace = computed(() => spaces.value.find((s) => s.id === spaceId.value))
 const canEdit = computed(() => currentSpace.value?.owned)
 const canPublish = computed(() => currentSpace.value?.owned)
-const canPromote = computed(() => currentSpace.value?.owned)
-const publicSpaces = computed(() => spaces.value.filter((s) => s.visibility === 'public' && !s.owned))
+const canPromote = computed(() => currentSpace.value?.owned && currentSpace.value?.visibility !== 'public')
+const publicSpaces = computed(() => spaces.value.filter((s) => s.visibility === 'public'))
 
 const renderedBody = computed(() => {
   if (!selected.value?.body_md) return ''
@@ -281,7 +282,7 @@ async function handlePublish(target: string) {
   } catch { return }
   try {
     await publishKbPage(selected.value.id, target)
-    ElMessage.success('OK')
+    ElMessage.success(t('knowledge.pages.published'))
     await selectPage(selected.value)
     fetchPages()
   } catch (e: any) {
@@ -292,7 +293,10 @@ async function handlePublish(target: string) {
 async function handlePromote() {
   if (!selected.value || !promoteTarget.value) return
   if (selected.value.source_count < 3 || selected.value.confidence < 0.8) {
-    ElMessage.warning(t('knowledge.pages.promoteGateFail'))
+    ElMessage.warning(t('knowledge.pages.promoteGateFailDetail', {
+      sources: selected.value.source_count ?? 0,
+      confidence: Math.round((selected.value.confidence ?? 0) * 100),
+    }))
     return
   }
   try {
@@ -319,6 +323,13 @@ onMounted(fetchSpaces)
 </script>
 
 <style scoped>
+.promote-empty {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--el-text-color-secondary);
+}
+
 .page-header {
   display: flex;
   align-items: flex-start;

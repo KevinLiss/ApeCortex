@@ -66,7 +66,13 @@
     "uploaded": "已入库，编译任务进行中",
     "empty": "还没有知识空间",
     "emptyDesc": "创建一个私有空间开始沉淀知识；或在 AI 助手对话中让 AI 直接帮你创建。",
-    "noSpaceSelected": "请先选择空间"
+    "noSpaceSelected": "请先选择空间",
+    "visibility": "空间类型",
+    "visibilityPrivate": "私有（仅自己可见）",
+    "visibilityPublic": "公开（全员可读）",
+    "visibilityPublicHint": "公开空间的词条全员可检索；发布需维护者发布为 live。创建公开库需维护者权限。",
+    "created": "空间已创建",
+    "needDoc": "请填写标题，正文至少 40 字"
   },
   "pages": {
     "title": "词条管理",
@@ -111,7 +117,11 @@
     "promoteNote": "提交说明（为什么值得公开）",
     "promoteSubmit": "提交晋升",
     "promoteGateFail": "该词条未达晋升门槛（来源数≥3 且 置信度≥0.8）",
-    "promoteSubmitted": "晋升申请已提交，等待审核"
+    "promoteSubmitted": "晋升申请已提交，等待审核",
+    "promoteTargetPlaceholder": "选择公开空间",
+    "promoteNoTarget": "还没有公开空间。请先在「知识空间」创建公开空间（需维护者权限）。",
+    "promoteGateFailDetail": "晋升门槛未达：来源 {sources}/3，置信度 {confidence}%/80%",
+    "published": "已发布"
   },
   "promotions": {
     "title": "晋升审核",
@@ -136,7 +146,8 @@
     "viewSnapshot": "查看快照",
     "snapshot": "提交快照（冻结）",
     "approved": "已批准并发布为草稿",
-    "reviewDone": "审核完成"
+    "reviewDone": "审核完成",
+    "selfReviewBlocked": "自己的申请需他人复核"
   },
   "tasks": {
     "title": "任务中心",

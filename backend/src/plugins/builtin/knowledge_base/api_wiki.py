@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.deps import get_current_user
+from src.core.deps import get_current_user, get_user_permissions
 from src.core.deps import require_permission as _require_perm
 from src.core.exceptions import success_response
 from src.db import get_db
@@ -57,9 +57,16 @@ async def post_space(
     _perm: Annotated[User, Depends(_require_perm("knowledge_base:space:create"))],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """创建私有空间。"""
+    """创建空间：默认私有；公开空间仅知识库维护者可建（路由层校验）。"""
+    vis = (body.get("visibility") or "private").lower()
+    if vis not in ("private", "public"):
+        raise HTTPException(status_code=400, detail="可见性仅支持 private / public")
+    if vis == "public":
+        perms = get_user_permissions(user)
+        if "*" not in perms and "knowledge_base:promotion:review" not in perms:
+            raise HTTPException(status_code=403, detail="仅知识库维护者可创建公开空间")
     result = await create_space(
-        user.id, body.get("name", ""), body.get("description", ""), "private"
+        user.id, body.get("name", ""), body.get("description", ""), vis
     )
     if not result.get("ok"):
         raise HTTPException(status_code=400, detail=result.get("msg"))
@@ -302,6 +309,8 @@ async def get_promotions(
             "snapshot_md": r.snapshot_md, "submit_note": r.submit_note,
             "submitted_by": r.submitted_by, "review_comment": r.review_comment,
             "published_page_id": r.published_page_id,
+            # 自审制衡：自己的申请不显示批准/拒绝（后端另有硬校验）
+            "can_review": r.submitted_by != user.id,
         } for r in items],
     })
 

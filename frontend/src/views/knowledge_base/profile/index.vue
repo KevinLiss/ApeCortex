@@ -22,17 +22,17 @@
           </span>
           <span class="meta-divider"></span>
           <span class="meta-item">
-            <span class="meta-value">{{ stats.byType.fact ?? 0 }}</span>
+            <span class="meta-value">{{ stats.byType?.fact ?? 0 }}</span>
             <span class="meta-label">{{ t('knowledge.profile.statFact') }}</span>
           </span>
           <span class="meta-divider"></span>
           <span class="meta-item">
-            <span class="meta-value">{{ stats.byType.preference ?? 0 }}</span>
+            <span class="meta-value">{{ stats.byType?.preference ?? 0 }}</span>
             <span class="meta-label">{{ t('knowledge.profile.statPreference') }}</span>
           </span>
           <span class="meta-divider"></span>
           <span class="meta-item">
-            <span class="meta-value">{{ (stats.byType.habit ?? 0) + (stats.byType.event ?? 0) }}</span>
+            <span class="meta-value">{{ (stats.byType?.habit ?? 0) + (stats.byType?.event ?? 0) }}</span>
             <span class="meta-label">{{ t('knowledge.profile.statHabit') }}</span>
           </span>
         </div>
@@ -222,10 +222,10 @@ const avatarText = computed(() => (userNickname.value || 'U').trim().charAt(0).t
 
 const typeTabs = computed(() => [
   { key: 'all', label: t('knowledge.profile.typeAll'), count: stats.value.total },
-  { key: 'fact', label: t('knowledge.profile.typeFact'), count: stats.value.byType.fact ?? 0 },
-  { key: 'preference', label: t('knowledge.profile.typePreference'), count: stats.value.byType.preference ?? 0 },
-  { key: 'habit', label: t('knowledge.profile.typeHabit'), count: stats.value.byType.habit ?? 0 },
-  { key: 'event', label: t('knowledge.profile.typeEvent'), count: stats.value.byType.event ?? 0 },
+  { key: 'fact', label: t('knowledge.profile.typeFact'), count: stats.value.byType?.fact ?? 0 },
+  { key: 'preference', label: t('knowledge.profile.typePreference'), count: stats.value.byType?.preference ?? 0 },
+  { key: 'habit', label: t('knowledge.profile.typeHabit'), count: stats.value.byType?.habit ?? 0 },
+  { key: 'event', label: t('knowledge.profile.typeEvent'), count: stats.value.byType?.event ?? 0 },
 ])
 
 const lastRewriteText = computed(() => stats.value.lastRewriteAt
@@ -281,7 +281,11 @@ function formatTime(value: string | null): string {
 async function fetchStats() {
   try {
     const res: any = await getKbStats()
-    stats.value = res ?? { total: 0, byType: {}, lastRewriteAt: null }
+    stats.value = {
+      total: res?.total ?? 0,
+      byType: res?.by_type ?? res?.byType ?? {},
+      lastRewriteAt: res?.last_rewrite_at ?? res?.lastRewriteAt ?? null,
+    }
   } catch { /* 统计失败不打断页面 */ }
 }
 
