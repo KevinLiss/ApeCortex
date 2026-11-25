@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-2.8.2-blue" alt="version">
+  <img src="https://img.shields.io/badge/version-2.10.0-blue" alt="version">
   <img src="https://img.shields.io/badge/python-3.11%2B-orange" alt="python">
   <img src="https://img.shields.io/badge/vue-3.5-brightgreen" alt="vue">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="license">
@@ -32,7 +32,7 @@
 
 ApeAdmin 是为 AI 应用时代打造的后台开发框架：基于 FastAPI + Vue3 构建平台化管理底座，原生适配 AI Agent 能力调用。
 
-框架的核心理念是**底座与业务解耦**——底座只提供权限、菜单、日志、MCP 网关等基础设施（外加一个教学用示例插件），业务功能全部以插件形式独立开发、独立分发；同时通过 MCP-SSE 网关把管理能力封装为标准化 AI 工具，实现传统业务系统与大模型智能体的无缝打通。
+框架的核心理念是**底座与业务解耦**——底座只提供权限、菜单、日志、MCP 网关等基础设施，业务功能全部以插件形式独立开发、独立分发；同时通过 MCP-SSE 网关把管理能力封装为标准化 AI 工具，实现传统业务系统与大模型智能体的无缝打通。本仓库在底座之外内置 [AI 知识库插件](#ai-知识库插件knowledge_base)（本项目的核心开发目标，详见 [docs/knowledge-base](docs/knowledge-base/)）。
 
 ## 目录
 
@@ -107,6 +107,20 @@ WordPress 式开箱体验，无需手工编辑配置文件：
 - **流式输出** —— SSE 流式 + Markdown 实时渲染 + 代码高亮
 - **Function Calling** —— AI 可调用 MCP 工具完成管理操作（多轮工具循环）
 - **密钥管理** —— 后台管理供应商密钥，Fernet 加密存储
+- **失败引导** —— 生成失败按错误类型弹窗引导（未配密钥/网络代理异常 → 一键跳转模型配置）
+
+### AI 知识库插件（knowledge_base）
+
+首个随本仓库发布的内置插件——让 AI 助手在与用户的对话中自动沉淀知识、形成个人画像：
+
+- **聊天记忆自动沉淀** —— 每轮对话完成后后台提取值得长期记住的事实/偏好/习惯/事件（单次 LLM ADD-only 提取，MD5 去重；重复出现自动强化置信度，不做 LLM 更新决策）
+- **双时序记忆模型** —— 事实有效轴（valid_at / invalid_at）＋系统事务轴，旧偏好不删除只打标失效，画像随时间演化全程可审计
+- **记忆画像页** —— 档案式布局：身份条＋画像卡片＋记忆时间线（置信度进度条、证据计数、类型筛选）
+- **MCP 工具 kb_save / kb_query** —— AI 助手可主动存取用户知识；``user`` 参数由运行时注入（不出现在 JSON Schema，模型不可见不可伪造，行级隔离）
+- **隐私合规** —— 记忆仅本人可见可删；沉淀全程异步后台任务，绝不阻塞聊天
+- **宿主新增 ``chat_message_complete`` 事件** —— 插件监听聊天完成钩子做后处理（零侵入插件范式）
+
+> 规划与选型依据见 [docs/knowledge-base](docs/knowledge-base/)：插件开发规划 ＋ 24 个开源对标仓库的代码精读调研笔记（WeKnora / mem0 / STORM / SwarmVault / EverOS 等）。P1（LLM Wiki 词条编译）与 P2（联网采集）见规划文档分期。
 
 ### 审计日志
 
@@ -428,6 +442,7 @@ class MyPlugin(PluginInterface):
 
 | 版本 | 日期 | 要点 |
 |------|------|------|
+| v2.10.0 | 2026-11-24 | 知识库插件 P0 落地：AI 知识库插件（聊天记忆自动沉淀＋用户画像＋kb_save/kb_query MCP 工具＋记忆画像页）；宿主新增 ``chat_message_complete`` 事件与 MCP 工具 ``user`` 参数运行时注入；代理兼容层 ``proxy_compat``（导入时归一化非法 IPv6 代理环境变量）＋关键外发调用 ``trust_env=False``；MySQL 密码 URL 转义；安装向导品牌图标自包含；聊天失败引导弹窗 |
 | v2.9.1 | 2026-11-24 | 安全修复批次：logout 吊销 refresh token 闭环；登录算术验证码服务端校验（``login_captcha_enabled`` 开关，默认关）；去除明文记住密码；数据范围（data_scope）第 4 层鉴权在用户列表落地；Alembic 迁移文件入库＋0001 幂等化＋迁移纪律；401 深路由跳转修复；admin_path 构建期可配置（``VITE_ADMIN_BASE``） |
 | v2.9.0 | 2026-11-23 | 架构三项：MCP 新增 Streamable HTTP 传输（共享 JSON-RPC 分发层）；Redis 真正启用（爆破防护/ticket/吊销缓存，可降级内存）；插件 MetaData 隔离（``make_plugin_base``）＋脚手架同步 |
 | v2.8.2 | 2026-11-21 | 修复全新克隆无法构建的库内残留（Plugins.vue 误入库）；README 重写 |

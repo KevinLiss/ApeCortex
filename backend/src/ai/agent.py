@@ -87,7 +87,7 @@ async def _call_llm(
         body["tool_choice"] = "auto"
 
     url = f"{base_url.rstrip('/')}/chat/completions"
-    async with httpx.AsyncClient(timeout=120.0) as client:
+    async with httpx.AsyncClient(timeout=120.0, trust_env=False) as client:
         resp = await client.post(url, headers=headers, json=body)
         if resp.status_code >= 400:
             error_body = resp.text
@@ -122,7 +122,7 @@ async def _call_llm_stream(
         body["tool_choice"] = "auto"
 
     url = f"{base_url.rstrip('/')}/chat/completions"
-    async with httpx.AsyncClient(timeout=120.0) as client:
+    async with httpx.AsyncClient(timeout=120.0, trust_env=False) as client:
         async with client.stream("POST", url, headers=headers, json=body) as resp:
             if resp.status_code >= 400:
                 error_body = (await resp.aread()).decode("utf-8", errors="replace")

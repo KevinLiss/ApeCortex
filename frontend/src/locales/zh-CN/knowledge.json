@@ -33,6 +33,14 @@
     "searchPlaceholder": "搜索记忆内容",
     "empty": "暂无记忆——在与 AI 助手的对话中提到你的背景、偏好时，会自动沉淀到这里。",
     "noSearchResult": "没有匹配的记忆",
-    "loadFailed": "加载失败"
+    "loadFailed": "加载失败",
+    "privacyTip": "记忆数据仅本人可见",
+    "emptyTitle": "还没有沉淀任何记忆",
+    "emptyDesc": "在与 AI 助手的对话中提到你的背景、偏好与习惯时，会自动提取到这里，形成你的专属画像。",
+    "rewriteDone": "画像已重写",
+    "deleteDone": "已删除",
+    "justNow": "刚刚",
+    "minAgo": "分钟前",
+    "hourAgo": "小时前"
   }
 }

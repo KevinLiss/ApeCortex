@@ -33,6 +33,14 @@
     "searchPlaceholder": "Search memory content",
     "empty": "No memories yet — background info and preferences you mention in chats with the AI assistant will be captured here automatically.",
     "noSearchResult": "No matching memories",
-    "loadFailed": "Failed to load"
+    "loadFailed": "Failed to load",
+    "privacyTip": "Memory data is visible only to you",
+    "emptyTitle": "No memories captured yet",
+    "emptyDesc": "Background info, preferences and habits you mention in chats with the AI assistant will be captured here automatically to build your profile.",
+    "rewriteDone": "Profile rewritten",
+    "deleteDone": "Deleted",
+    "justNow": "just now",
+    "minAgo": "min ago",
+    "hourAgo": "h ago"
   }
 }
