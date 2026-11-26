@@ -28,7 +28,7 @@
       <el-table-column :label="t('common.action.label')" width="230" fixed="right" align="center">
         <template #default="{ row }">
           <el-button link size="small" @click="openDetail(row)">{{ t('knowledge.push.view') }}</el-button>
-          <el-button link size="small" type="success" @click="handleDispose(row, 'kept_evidence')">
+          <el-button link size="small" type="primary" @click="handleDispose(row, 'kept_evidence')">
             {{ t('knowledge.violation.keepEvidence') }}
           </el-button>
           <el-button link size="small" type="danger" @click="handleDispose(row, 'deleted')">

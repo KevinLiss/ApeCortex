@@ -1807,6 +1807,11 @@ html.dark .session-item.archived .session-item-title {
   margin-left: -2px;
 }
 
+/* 启用角标跟随主题色（el-badge 默认红色太突兀） */
+.kb-dot-badge :deep(.el-badge__content) {
+  background-color: var(--el-color-primary);
+}
+
 /* 知识库偏好弹层 */
 .kb-prefs-panel {
   font-size: 13px;

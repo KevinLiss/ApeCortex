@@ -49,9 +49,9 @@
           </template>
           <p class="card-desc">{{ t('knowledge.settings.acDesc') }}</p>
           <div class="src-list">
-            <div class="src-row"><span class="src-name">arXiv</span><el-tag size="small" type="success" effect="plain" round>always on</el-tag></div>
-            <div class="src-row"><span class="src-name">OpenAlex</span><el-tag size="small" type="success" effect="plain" round>always on</el-tag></div>
-            <div class="src-row"><span class="src-name">Semantic Scholar</span><el-tag size="small" type="success" effect="plain" round>always on</el-tag></div>
+            <div class="src-row"><span class="src-name">arXiv</span><el-tag size="small" type="primary" effect="plain" round>always on</el-tag></div>
+            <div class="src-row"><span class="src-name">OpenAlex</span><el-tag size="small" type="primary" effect="plain" round>always on</el-tag></div>
+            <div class="src-row"><span class="src-name">Semantic Scholar</span><el-tag size="small" type="primary" effect="plain" round>always on</el-tag></div>
           </div>
           <el-alert :title="t('knowledge.settings.privacy')" type="info" :closable="false" show-icon class="privacy" />
         </el-card>

@@ -39,7 +39,7 @@
               <el-icon><CircleCheck /></el-icon>{{ t('knowledge.docs.compiledYes') }}
             </span>
             <span v-else class="doc-compiled no">{{ t('knowledge.docs.compiledNo') }}</span>
-            <el-tag v-if="d.page_count" size="small" type="success" effect="light" round class="doc-pages">
+            <el-tag v-if="d.page_count" size="small" type="primary" effect="light" round class="doc-pages">
               {{ d.page_count }} {{ t('knowledge.docs.pagesUnit') }}
             </el-tag>
             <div class="doc-row-actions">
@@ -49,7 +49,7 @@
               <el-button v-if="canWrite" link size="small" type="primary" @click.stop="handleCompile(d)">
                 {{ t('knowledge.docs.recompile') }}
               </el-button>
-              <el-button v-if="canWrite && canPush" link size="small" type="warning" @click.stop="openPush(d)">
+              <el-button v-if="canWrite && canPush" link size="small" type="primary" @click.stop="openPush(d)">
                 {{ t('knowledge.push.pushShort') }}
               </el-button>
               <el-button v-if="canWrite" link size="small" type="danger" @click.stop="handleDelete(d)">

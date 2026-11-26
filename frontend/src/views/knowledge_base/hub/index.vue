@@ -107,7 +107,7 @@
     >
       <div v-if="pageDetail" class="drawer-body">
         <div class="drawer-meta">
-          <el-tag v-if="categoryName(pageDetail.category_id)" size="small" type="success" effect="plain" round>
+          <el-tag v-if="categoryName(pageDetail.category_id)" size="small" type="primary" effect="plain" round>
             {{ categoryName(pageDetail.category_id) }}
           </el-tag>
           <span v-if="pageDetail.updated_at">{{ t('knowledge.hub.updated') }} {{ formatTime(pageDetail.updated_at) }}</span>
