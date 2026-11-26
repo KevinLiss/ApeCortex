@@ -231,13 +231,18 @@
                 trigger="click"
               >
                 <template #reference>
-                  <el-tooltip content="知识库启用配置（知识中心与个人空间）" placement="top">
-                    <div class="tools-toggle" :class="{ 'kb-active': kbOn }">
-                      <el-icon :size="14"><Collection /></el-icon>
-                      <span>知识库</span>
-                      <el-badge v-if="kbOn" is-dot class="kb-dot-badge" />
-                    </div>
-                  </el-tooltip>
+                  <!-- 注意：reference 插槽必须是纯 DOM 元素；嵌 el-tooltip 会使
+                       popover 的点击触发绑定失效（真实鼠标点击打不开弹层）。
+                       hover 提示用原生 title 属性承担。 -->
+                  <div
+                    class="tools-toggle"
+                    :class="{ 'kb-active': kbOn }"
+                    title="知识库启用配置（知识中心与个人空间）"
+                  >
+                    <el-icon :size="14"><Collection /></el-icon>
+                    <span>知识库</span>
+                    <el-badge v-if="kbOn" is-dot class="kb-dot-badge" />
+                  </div>
                 </template>
                 <div class="kb-prefs-panel">
                   <div class="kb-prefs-title">知识库启用配置</div>
