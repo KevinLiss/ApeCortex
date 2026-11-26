@@ -8,6 +8,12 @@
     </div>
 
     <el-tabs v-model="tab">
+      <el-tab-pane :label="t('knowledge.push.tabPush')" v-if="canReviewPush" name="push">
+        <PushTab v-if="tab === 'push'" />
+      </el-tab-pane>
+      <el-tab-pane :label="t('knowledge.violation.tabViolation')" v-if="canDispose" name="violation">
+        <ViolationTab v-if="tab === 'violation'" />
+      </el-tab-pane>
       <el-tab-pane :label="t('knowledge.promotions.tabReview')" name="review">
         <el-table :data="reviewItems" v-loading="loading" stripe>
           <el-table-column prop="snapshot_title" :label="t('knowledge.promotions.colTitle')" min-width="180" show-overflow-tooltip />
@@ -148,6 +154,8 @@ import DOMPurify from 'dompurify'
 
 import { getKbPromotions, getMyKbPromotions, reviewKbPromotion, getKbContributions, getKbPendingPublish, publishKbPage } from '@/api'
 import { useUserStore } from '@/stores/user'
+import PushTab from './components/PushTab.vue'
+import ViolationTab from './components/ViolationTab.vue'
 
 const { t } = useI18n()
 
@@ -164,6 +172,8 @@ const snapshotConflict = ref<any>(null)
 const pendingLoading = ref(false)
 const userStore = useUserStore()
 const canPublish = computed(() => userStore.hasPermission('knowledge_base:page:publish'))
+const canReviewPush = computed(() => userStore.hasPermission('knowledge_base:submission:review'))
+const canDispose = computed(() => userStore.hasPermission('knowledge_base:submission:dispose'))
 const snapshotVisible = ref(false)
 const snapshotHtml = ref('')
 

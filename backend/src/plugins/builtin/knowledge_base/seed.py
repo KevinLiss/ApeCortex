@@ -87,6 +87,20 @@ async def seed_knowledge_base_data(db: AsyncSession) -> None:
         await db.flush()
         logger.info("Migrated: '词条管理' menu merged into '知识空间'")
 
+    # ── 1.6 N2 菜单迁移：「晋升审核」改名「审核中心」──────────
+    review_menu = next(
+        (m for m in (await db.execute(
+            select(Menu).where(
+                Menu.parent_id == parent.id, Menu.path == "promotions", Menu.type == "C"
+            )
+        )).scalars().all()),
+        None,
+    )
+    if review_menu is not None and review_menu.name != "审核中心":
+        review_menu.name = "审核中心"
+        await db.flush()
+        logger.info("Migrated: '晋升审核' menu renamed to '审核中心'")
+
     # ── 2. 子菜单 + 按钮权限（N1 重构后结构）─────────
     # (name, parent_name, type, path, component, permission, icon, sort, i18n_key)
     menu_specs = [
@@ -101,10 +115,13 @@ async def seed_knowledge_base_data(db: AsyncSession) -> None:
         ("发布词条", "知识空间", "F", None, None, "knowledge_base:page:publish", None, 4, None),
         ("编辑词条", "知识空间", "F", None, None, "knowledge_base:page:edit", None, 5, None),
         ("编译文档", "知识空间", "F", None, None, "knowledge_base:doc:compile", None, 6, None),
-        ("晋升审核", None, "C", "promotions", "knowledge_base/promotions/index",
+        ("提交推送", "知识空间", "F", None, None, "knowledge_base:submission:submit", None, 7, None),
+        ("审核中心", None, "C", "promotions", "knowledge_base/promotions/index",
          "knowledge_base:promotion:review", "Stamp", 3, "menu.kb.promotions"),
-        ("提交晋升", "晋升审核", "F", None, None, "knowledge_base:promotion:submit", None, 1, None),
-        ("审核晋升", "晋升审核", "F", None, None, "knowledge_base:promotion:review", None, 2, None),
+        ("提交晋升", "审核中心", "F", None, None, "knowledge_base:promotion:submit", None, 1, None),
+        ("审核晋升", "审核中心", "F", None, None, "knowledge_base:promotion:review", None, 2, None),
+        ("审核推送", "审核中心", "F", None, None, "knowledge_base:submission:review", None, 3, None),
+        ("处置违规", "审核中心", "F", None, None, "knowledge_base:submission:dispose", None, 4, None),
         ("任务中心", None, "C", "tasks", "knowledge_base/tasks/index",
          "knowledge_base:task:list", "Timer", 4, "menu.kb.tasks"),
         ("重试任务", "任务中心", "F", None, None, "knowledge_base:task:retry", None, 1, None),

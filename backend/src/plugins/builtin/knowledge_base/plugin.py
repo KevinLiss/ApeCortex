@@ -62,7 +62,7 @@ class KnowledgeBasePlugin(PluginInterface):
         "私有/共享/公开空间与 PR 式晋升、三通道召回、联网采集与学术深度调研、"
         "公开库只读出口与 MCP 知识接口。"
     )
-    version = "0.5.0"
+    version = "0.6.0"
     author = "ApeAdmin"
 
     # ── 生命周期：安装（建表 + seed）──────────────────
@@ -134,6 +134,7 @@ class KnowledgeBasePlugin(PluginInterface):
         from src.plugins.builtin.knowledge_base.api_docs import router as docs_router
         from src.plugins.builtin.knowledge_base.api_hub import router as hub_router
         from src.plugins.builtin.knowledge_base.api_public import router as public_router
+        from src.plugins.builtin.knowledge_base.api_push import router as push_router
         from src.plugins.builtin.knowledge_base.api_wiki import router as wiki_router
 
         app.include_router(router, prefix=settings.API_PREFIX)
@@ -141,6 +142,7 @@ class KnowledgeBasePlugin(PluginInterface):
         app.include_router(public_router, prefix=settings.API_PREFIX)
         app.include_router(hub_router, prefix=settings.API_PREFIX)
         app.include_router(docs_router, prefix=settings.API_PREFIX)
+        app.include_router(push_router, prefix=settings.API_PREFIX)
 
         # 订阅聊天完成事件 → 后台记忆提取（handler 内部 spawn 任务，快速返回）
         event_bus.on(

@@ -7,7 +7,7 @@
 import json
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -177,7 +177,7 @@ async def upload_doc_file(
     try:
         title, content = parse_file_to_text(file.filename or "", data)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     result = await ingest_doc(
         user.id, space_id, title, content,
@@ -262,5 +262,5 @@ async def compile_doc(
             space_id=space_id,
         )
     except RuntimeError as exc:  # 成本护栏：当日任务超限
-        raise HTTPException(status_code=429, detail=str(exc))
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
     return success_response(data={"job_id": job_id}, msg="编译任务已入队")

@@ -1,8 +1,8 @@
 {
   "name": "knowledge_base",
   "display_name": "ApeCortex",
-  "version": "0.5.0",
-  "description": "ApeCortex——给 ApeAdmin 装上知识大脑皮层：知识中心（分类浏览公开库）、知识空间（文档上传 md/txt/pdf/docx + 词条管理）、聊天记忆沉淀与画像、LLM Wiki 编译、私有/共享/公开三档空间与 PR 式晋升、三通道召回、联网采集与学术深度调研、公开库只读出口与 MCP 知识接口。",
+  "version": "0.6.0",
+  "description": "ApeCortex——给 ApeAdmin 装上知识大脑皮层：知识中心（分类浏览公开库）、知识空间（文档上传与词条管理）、文档级推送公开库（AI 自动分类与违规初筛、人工审核、违规留存处置）、聊天记忆沉淀与画像、LLM Wiki 编译、三通道召回、联网采集与学术深度调研、公开库只读出口与 MCP 知识接口。",
   "author": "ApeAdmin",
   "dependencies": []
 }

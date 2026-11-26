@@ -172,6 +172,10 @@ async def _execute(job_id: int) -> None:
                 transcript_override=payload.get("transcript"),
             )
             result = {"inserted": inserted}
+        elif job_type == "public_submission":
+            from src.plugins.builtin.knowledge_base.pipeline.submission import analyze_submission
+            result = await analyze_submission(payload.get("submission_id", 0))
+            await _bump_llm_calls(job_id, 1)
         else:
             raise ValueError(f"未知任务类型: {job_type}")
 

@@ -341,3 +341,12 @@ export const uploadKbDocFile = (spaceId: number, file: File) => {
 }
 export const deleteKbDoc = (spaceId: number, docId: number) => request.delete(`/knowledge-base/spaces/${spaceId}/docs/${docId}`)
 export const compileKbDoc = (spaceId: number, docId: number) => request.post(`/knowledge-base/spaces/${spaceId}/docs/${docId}/compile`)
+
+// ---- Knowledge Base N2：公开库推送与审核 ----
+export const submitKbPublic = (spaceId: number, docId: number, data: any) => request.post(`/knowledge-base/spaces/${spaceId}/docs/${docId}/submit-public`, data)
+export const getKbPushTargets = () => request.get('/knowledge-base/submissions/targets')
+export const getKbSubmissions = (params?: any) => request.get('/knowledge-base/submissions', { params })
+export const getMyKbSubmissions = () => request.get('/knowledge-base/submissions/mine')
+export const getKbSubmission = (id: number) => request.get(`/knowledge-base/submissions/${id}`)
+export const reviewKbSubmission = (id: number, data: any) => request.post(`/knowledge-base/submissions/${id}/review`, data)
+export const disposeKbSubmission = (id: number, data: any) => request.post(`/knowledge-base/submissions/${id}/dispose`, data)

@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.deps import get_current_user, get_user_permissions
+from src.core.deps import get_current_user
 from src.core.deps import require_permission as _require_perm
 from src.core.exceptions import success_response
 from src.db import get_db
@@ -59,25 +59,22 @@ async def get_categories(
             ).group_by(KbSpace.category_id)
         )).all()
     )
-    cat_by_id = {c.id: c for c in cats}
     nodes = {c.id: _cat_out(c) for c in cats}
     roots: list[dict] = []
     for c in cats:
         node = nodes[c.id]
-        own = space_counts.get(c.id, 0)
+        node["space_count"] = space_counts.get(c.id, 0)
         if c.parent_id is None:
             roots.append(node)
         elif c.parent_id in nodes:
             nodes[c.parent_id]["children"].append(node)
         else:  # 父分类已删（防御）：上提为一级
             roots.append(node)
+    # 子分类数量并入一级展示
     for c in cats:
-        node = nodes[c.id]
-        node["space_count"] = own_count = space_counts.get(c.id, 0)
-        if c.parent_id is not None and c.parent_id in cat_by_id:
-            # 子分类数量并入一级展示
+        if c.parent_id is not None and c.parent_id in nodes:
             nodes[c.parent_id]["space_count"] = (
-                nodes[c.parent_id].get("space_count", 0) + own_count
+                nodes[c.parent_id].get("space_count", 0) + space_counts.get(c.id, 0)
             )
     return success_response(data={"items": roots})
 
@@ -284,11 +281,11 @@ async def hub_pages(
     if category_id == 0:
         conds.append(KbSpace.category_id.is_(None))
     elif category_id is not None:
-        cat_ids = {category_id} | set(
+        cat_ids = {category_id} | {
             r[0] for r in (await db.execute(
                 select(KbCategory.id).where(KbCategory.parent_id == category_id)
             )).all()
-        )
+        }
         conds.append(KbSpace.category_id.in_(cat_ids))
     if search.strip():
         conds.append(KbWikiPage.title.contains(search.strip()))

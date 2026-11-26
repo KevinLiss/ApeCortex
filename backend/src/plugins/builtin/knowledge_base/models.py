@@ -430,6 +430,78 @@ class KbPublicKey(IDMixin, TimestampMixin, PluginBase):
         return f"<KbPublicKey {self.id} {self.name} enabled={self.enabled}>"
 
 
+class KbPublicSubmission(IDMixin, TimestampMixin, PluginBase):
+    """公开库推送单（N2）：文档级推送 → AI 分类/违规初筛 → 人审 → 入公开库拆词条。
+
+    状态机：
+        ai_reviewing → pending（AI 判正常，待人审）
+        ai_reviewing → violation（AI 判违规，进违规处置队列，内容留存）
+        pending → approved（通过：文档拷贝入目标公开库并触发编译拆词条）
+        pending → rejected（拒绝：不入库，正常退回）
+        violation → disposed（人工处置完成：deleted=已清理 / kept_evidence=保留存证）
+
+    内容快照冻结（doc_title/doc_content/content_hash），与源文档生命周期解耦——
+    源文档删除后审核照常可读；违规内容留存供人工核查（用户决策 D2）。
+    """
+
+    __tablename__ = "kb_public_submission"
+
+    source_space_id: Mapped[int] = mapped_column(
+        Integer, nullable=False, index=True, comment="源空间"
+    )
+    source_doc_id: Mapped[int] = mapped_column(
+        Integer, nullable=False, comment="源文档 ID（可能已被删，内容以快照为准）"
+    )
+    doc_title: Mapped[str] = mapped_column(String(200), nullable=False, comment="文档标题快照")
+    doc_content: Mapped[str] = mapped_column(Text, nullable=False, comment="文档内容快照（冻结）")
+    content_hash: Mapped[str] = mapped_column(
+        String(48), nullable=False, index=True, comment="内容哈希（重复推送幂等）"
+    )
+    target_space_id: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, comment="目标公开库（审核员可改）"
+    )
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="ai_reviewing", index=True,
+        comment="ai_reviewing/pending/approved/rejected/violation/disposed",
+    )
+    # AI 分析结果（一次 LLM 调用产出）
+    ai_category_id: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, comment="AI 建议分类"
+    )
+    ai_category_reason: Mapped[str] = mapped_column(
+        String(500), nullable=False, default="", comment="AI 分类理由"
+    )
+    ai_risk_type: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="none",
+        comment="违规类型: none/politics/porn/violence/copyright/ad/privacy",
+    )
+    ai_risk_level: Mapped[str] = mapped_column(
+        String(10), nullable=False, default="none", comment="违规等级: none/low/medium/high"
+    )
+    ai_split_preview: Mapped[str] = mapped_column(
+        Text, nullable=False, default="[]", comment="建议拆出词条标题(JSON)"
+    )
+    submitted_by: Mapped[int] = mapped_column(
+        Integer, nullable=False, index=True, comment="提交人"
+    )
+    reviewer_id: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="审核人")
+    review_comment: Mapped[str] = mapped_column(
+        String(500), nullable=False, default="", comment="审核/处置意见"
+    )
+    reviewed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, comment="审核时间"
+    )
+    disposal_action: Mapped[str | None] = mapped_column(
+        String(20), nullable=True, comment="violation 处置: deleted/kept_evidence"
+    )
+    disposed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, comment="处置时间"
+    )
+
+    def __repr__(self) -> str:
+        return f"<KbPublicSubmission {self.id} status={self.status}>"
+
+
 class KbSetting(IDMixin, TimestampMixin, PluginBase):
     """插件设置（键值对，settings 页读写；ome.toml 思想——策略可整体关停）。"""
 

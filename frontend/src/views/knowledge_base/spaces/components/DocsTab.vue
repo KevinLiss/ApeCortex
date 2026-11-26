@@ -16,6 +16,12 @@
         <el-button :icon="Document" :disabled="!canWrite" @click="pasteVisible = true">
           {{ t('knowledge.docs.paste') }}
         </el-button>
+        <el-button
+          v-if="canPush"
+          :icon="Promotion"
+          :disabled="!canWrite"
+          @click="openPush(null)"
+        >{{ t('knowledge.push.pushPublic') }}</el-button>
       </div>
       <span class="toolbar-hint">{{ t('knowledge.docs.uploadTip') }}</span>
     </div>
@@ -57,6 +63,9 @@
           <el-button v-if="canWrite" link size="small" type="primary" @click="handleCompile(row)">
             {{ t('knowledge.docs.recompile') }}
           </el-button>
+          <el-button v-if="canWrite && canPush" link size="small" type="warning" @click="openPush(row)">
+            {{ t('knowledge.push.pushShort') }}
+          </el-button>
           <el-button v-if="canWrite" link size="small" type="danger" @click="handleDelete(row)">
             {{ t('common.action.delete') }}
           </el-button>
@@ -88,6 +97,25 @@
         <el-button @click="pasteVisible = false">{{ t('common.action.cancel') }}</el-button>
         <el-button type="primary" :loading="uploading" @click="handlePasteUpload">
           {{ t('common.action.confirm') }}
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 推送公开库弹窗 -->
+    <el-dialog v-model="pushVisible" :title="t('knowledge.push.pushTitle')" width="460px">
+      <el-form label-position="top">
+        <el-form-item :label="t('knowledge.push.pushTarget')">
+          <el-select v-model="pushTarget" style="width: 100%" clearable>
+            <el-option v-for="s in pushTargets" :key="s.id" :value="s.id" :label="s.name" />
+          </el-select>
+          <div v-if="!pushTargets.length" class="push-empty">{{ t('knowledge.push.noTarget') }}</div>
+        </el-form-item>
+        <p class="push-tip">{{ t('knowledge.push.pushFlowTip') }}</p>
+      </el-form>
+      <template #footer>
+        <el-button @click="pushVisible = false">{{ t('common.action.cancel') }}</el-button>
+        <el-button type="primary" :loading="pushing" :disabled="!pushDoc" @click="handlePush">
+          {{ t('knowledge.push.pushSubmit') }}
         </el-button>
       </template>
     </el-dialog>
@@ -126,18 +154,20 @@
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { CircleCheck, Document, Upload } from '@element-plus/icons-vue'
+import { CircleCheck, Document, Promotion, Upload } from '@element-plus/icons-vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 
 import {
-  compileKbDoc, deleteKbDoc, getKbSpaceDoc, getKbSpaceDocs, uploadKbDoc, uploadKbDocFile,
+  compileKbDoc, deleteKbDoc, getKbPushTargets, getKbSpaceDoc, getKbSpaceDocs, submitKbPublic, uploadKbDoc, uploadKbDocFile,
 } from '@/api'
+import { useUserStore } from '@/stores/user'
 
 const props = defineProps<{ spaceId: number; canWrite: boolean }>()
 const emit = defineEmits<{ (e: 'refresh'): void; (e: 'goto-page', pageId: number): void }>()
 
 const { t } = useI18n()
+const userStore = useUserStore()
 
 const docs = ref<any[]>([])
 const loading = ref(false)
@@ -148,6 +178,13 @@ const pasteContent = ref('')
 const pasteUrl = ref('')
 const docDrawerVisible = ref(false)
 const docDetail = ref<any>(null)
+
+const pushVisible = ref(false)
+const pushDoc = ref<any>(null)
+const pushTarget = ref<number | null>(null)
+const pushing = ref(false)
+const pushTargets = ref<any[]>([])
+const canPush = computed(() => userStore.hasPermission('knowledge_base:submission:submit'))
 
 const renderedDoc = computed(() => {
   if (!docDetail.value?.content) return ''
@@ -183,6 +220,31 @@ async function handleFileUpload(options: any) {
 function triggerUpload() {
   const el = document.querySelector<HTMLInputElement>('.docs-tab .el-upload')
   el?.querySelector('input')?.click()
+}
+
+async function openPush(row: any) {
+  pushDoc.value = row
+  pushTarget.value = null
+  try {
+    const res: any = await getKbPushTargets()
+    pushTargets.value = res?.items ?? []
+    pushTarget.value = pushTargets.value[0]?.id ?? null
+  } catch { /* 拦截器已提示 */ }
+  pushVisible.value = true
+}
+
+async function handlePush() {
+  if (!pushDoc.value) return
+  pushing.value = true
+  try {
+    await submitKbPublic(props.spaceId, pushDoc.value.id, {
+      target_space_id: pushTarget.value ?? undefined,
+    })
+    ElMessage.success(t('knowledge.push.submitted'))
+    pushVisible.value = false
+  } catch (e: any) { /* 拦截器已提示（含重复推送幂等文案） */ } finally {
+    pushing.value = false
+  }
 }
 
 async function handlePasteUpload() {
@@ -371,5 +433,18 @@ defineExpose({ refresh: fetchDocs })
   font-size: 14px;
   line-height: 1.75;
   word-break: break-word;
+}
+
+.push-empty {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.push-tip {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--el-text-color-secondary);
 }
 </style>
