@@ -26,59 +26,54 @@
       <span class="toolbar-hint">{{ t('knowledge.docs.uploadTip') }}</span>
     </div>
 
-    <!-- 文档列表 -->
-    <el-table :data="docs" v-loading="loading" size="default" class="docs-table">
-      <el-table-column :label="t('knowledge.docs.colTitle')" min-width="220">
-        <template #default="{ row }">
-          <div class="doc-title-cell">
-            <el-tag size="small" :type="typeTag(row.source_type)" effect="plain" round class="doc-type">
-              {{ typeLabel(row.source_type) }}
+    <!-- 文档列表（紧凑行式，MaxKB 文档列表风格） -->
+    <el-card shadow="never" class="docs-list-card">
+      <div v-loading="loading" class="docs-list">
+        <div v-for="d in docs" :key="d.id" class="doc-row" @click="openDoc(d)">
+          <div class="doc-row-main">
+            <el-tag size="small" :type="typeTag(d.source_type)" effect="plain" class="doc-type">
+              {{ typeLabel(d.source_type) }}
             </el-tag>
-            <span class="doc-title" @click="openDoc(row)">{{ row.title }}</span>
+            <span class="doc-row-title">{{ d.title }}</span>
+            <span v-if="d.compiled_at" class="doc-compiled">
+              <el-icon><CircleCheck /></el-icon>{{ t('knowledge.docs.compiledYes') }}
+            </span>
+            <span v-else class="doc-compiled no">{{ t('knowledge.docs.compiledNo') }}</span>
+            <el-tag v-if="d.page_count" size="small" type="success" effect="light" round class="doc-pages">
+              {{ d.page_count }} {{ t('knowledge.docs.pagesUnit') }}
+            </el-tag>
+            <div class="doc-row-actions">
+              <el-button v-if="canWrite" link size="small" type="primary" @click.stop="handleCompile(d)">
+                {{ t('knowledge.docs.recompile') }}
+              </el-button>
+              <el-button v-if="canWrite && canPush" link size="small" type="warning" @click.stop="openPush(d)">
+                {{ t('knowledge.push.pushShort') }}
+              </el-button>
+              <el-button v-if="canWrite" link size="small" type="danger" @click.stop="handleDelete(d)">
+                {{ t('common.action.delete') }}
+              </el-button>
+            </div>
           </div>
-        </template>
-      </el-table-column>
-      <el-table-column :label="t('knowledge.docs.colChars')" width="90" align="center">
-        <template #default="{ row }">{{ row.char_count.toLocaleString() }}</template>
-      </el-table-column>
-      <el-table-column :label="t('knowledge.docs.colCompiled')" width="110" align="center">
-        <template #default="{ row }">
-          <span v-if="row.compiled_at" class="compiled-yes">
-            <el-icon><CircleCheck /></el-icon>{{ t('knowledge.docs.compiledYes') }}
-          </span>
-          <span v-else class="compiled-no">{{ t('knowledge.docs.compiledNo') }}</span>
-        </template>
-      </el-table-column>
-      <el-table-column :label="t('knowledge.docs.colPages')" width="100" align="center">
-        <template #default="{ row }">
-          <el-tag v-if="row.page_count" size="small" type="success" effect="light" round>
-            {{ row.page_count }} {{ t('knowledge.docs.pagesUnit') }}
-          </el-tag>
-          <span v-else class="compiled-no">0</span>
-        </template>
-      </el-table-column>
-      <el-table-column :label="t('common.action.label')" width="200" align="center">
-        <template #default="{ row }">
-          <el-button link size="small" @click="openDoc(row)">{{ t('knowledge.docs.view') }}</el-button>
-          <el-button v-if="canWrite" link size="small" type="primary" @click="handleCompile(row)">
-            {{ t('knowledge.docs.recompile') }}
-          </el-button>
-          <el-button v-if="canWrite && canPush" link size="small" type="warning" @click="openPush(row)">
-            {{ t('knowledge.push.pushShort') }}
-          </el-button>
-          <el-button v-if="canWrite" link size="small" type="danger" @click="handleDelete(row)">
-            {{ t('common.action.delete') }}
-          </el-button>
-        </template>
-      </el-table-column>
-      <template #empty>
-        <el-empty :description="t('knowledge.docs.empty')" :image-size="72">
+          <div class="doc-row-meta">
+            <span>{{ d.char_count.toLocaleString() }} {{ t('knowledge.docs.charsUnit') }}</span>
+            <span v-if="d.compiled_at">{{ formatTime(d.compiled_at) }}</span>
+            <a v-if="d.url" :href="d.url" target="_blank" rel="noopener" class="doc-url" @click.stop>
+              {{ d.url }}
+            </a>
+            <span class="doc-view-hint">{{ t('knowledge.docs.view') }} →</span>
+          </div>
+        </div>
+        <el-empty v-if="!docs.length && !loading" :description="t('knowledge.docs.empty')" :image-size="72">
           <el-button v-if="canWrite" type="primary" :icon="Upload" @click="triggerUpload">
             {{ t('knowledge.docs.uploadFirst') }}
           </el-button>
         </el-empty>
-      </template>
-    </el-table>
+      </div>
+      <div v-if="docs.length" class="docs-foot">
+        <span class="docs-count">{{ docs.length }} {{ t('knowledge.docs.docUnit') }} ·
+          {{ totalChars.toLocaleString() }} {{ t('knowledge.docs.charsUnit') }}</span>
+      </div>
+    </el-card>
 
     <!-- 粘贴文本弹窗 -->
     <el-dialog v-model="pasteVisible" :title="t('knowledge.docs.pasteTitle')" width="560px">
@@ -185,6 +180,7 @@ const pushTarget = ref<number | null>(null)
 const pushing = ref(false)
 const pushTargets = ref<any[]>([])
 const canPush = computed(() => userStore.hasPermission('knowledge_base:submission:submit'))
+const totalChars = computed(() => docs.value.reduce((acc, d) => acc + (d.char_count || 0), 0))
 
 const renderedDoc = computed(() => {
   if (!docDetail.value?.content) return ''
@@ -342,53 +338,142 @@ defineExpose({ refresh: fetchDocs })
   color: var(--el-text-color-secondary);
 }
 
-.doc-title-cell {
+/* 文档行式列表（紧凑，与词条列表同设计语言） */
+.docs-list-card {
+  border-radius: 10px;
+}
+
+.docs-list-card :deep(.el-card__body) {
+  padding: 6px 8px;
+}
+
+.docs-list {
+  min-height: 200px;
+}
+
+.doc-row {
+  padding: 10px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.doc-row:hover {
+  background: var(--el-color-primary-light-9);
+}
+
+.doc-row-main {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   min-width: 0;
 }
 
 .doc-type {
   flex-shrink: 0;
+  border-radius: 5px;
 }
 
-.doc-title {
+.doc-row-title {
+  flex: 1;
+  min-width: 0;
   font-size: 14px;
   font-weight: 500;
-  color: var(--el-text-color-primary);
-  cursor: pointer;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.doc-title:hover {
-  color: var(--el-color-primary);
-}
-
-.compiled-yes {
+.doc-compiled {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  flex-shrink: 0;
   font-size: 12px;
   color: var(--el-color-success);
 }
 
-.compiled-no {
-  font-size: 12px;
+.doc-compiled.no {
   color: var(--el-text-color-secondary);
 }
 
+.doc-pages {
+  flex-shrink: 0;
+}
+
+.doc-row-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.doc-row:hover .doc-row-actions,
+.doc-row:focus-within .doc-row-actions {
+  opacity: 1;
+}
+
+.doc-row-meta {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 4px;
+  padding-left: 2px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--el-text-color-secondary);
+}
+
+.doc-url {
+  max-width: 40%;
+  font-size: 12px;
+  color: var(--el-color-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.doc-url:hover {
+  text-decoration: underline;
+}
+
+.doc-view-hint {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--el-color-primary);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.doc-row:hover .doc-view-hint {
+  opacity: 1;
+}
+
+.docs-foot {
+  display: flex;
+  justify-content: flex-end;
+  padding: 8px 12px 4px;
+}
+
+.docs-count {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--el-text-color-secondary);
+}
+
+/* 抽屉 */
 .doc-drawer {
-  padding: 0 4px;
+  padding: 0 6px 12px;
 }
 
 .doc-meta-row {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-bottom: 14px;
+  padding-bottom: 12px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
   font-size: 12px;
   color: var(--el-text-color-secondary);
 }
@@ -431,8 +516,34 @@ defineExpose({ refresh: fetchDocs })
 
 .doc-content {
   font-size: 14px;
-  line-height: 1.75;
+  line-height: 1.8;
   word-break: break-word;
+}
+
+/* 文档全文排版：长链接断行、引用列表对齐 */
+.doc-content :deep(a) {
+  color: var(--el-color-primary);
+  text-decoration: none;
+  word-break: break-all;
+  line-height: 1.6;
+}
+
+.doc-content :deep(a:hover) {
+  text-decoration: underline;
+}
+
+.doc-content :deep(ol),
+.doc-content :deep(ul) {
+  padding-left: 1.4em;
+  margin: 8px 0;
+}
+
+.doc-content :deep(li) {
+  margin: 3px 0;
+}
+
+.doc-content :deep(p) {
+  margin: 8px 0;
 }
 
 .push-empty {

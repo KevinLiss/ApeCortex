@@ -137,6 +137,24 @@ async def seed_knowledge_base_data(db: AsyncSession) -> None:
 
     existing = list((await db.execute(select(Menu))).scalars().all())
 
+    # ── 2.1 排序自愈：存量 C 菜单的 sort 强制对齐 specs（旧库只建不改导致同 sort
+    #     按 id 排序，如记忆画像/知识空间/知识中心三条同为 1——知识中心被挤后位）
+    c_sort_expected = {
+        spec[3]: spec[7]
+        for spec in menu_specs
+        if spec[2] == "C"
+    }
+    c_children = [m for m in existing if m.parent_id == parent.id and m.type == "C"]
+    fixed_sorts: list[str] = []
+    for m in c_children:
+        expected = c_sort_expected.get(m.path)
+        if expected is not None and m.sort != expected:
+            m.sort = expected
+            fixed_sorts.append(f"{m.name}→{expected}")
+    if fixed_sorts:
+        await db.flush()
+        logger.info(f"Resorted C menus: {', '.join(fixed_sorts)}")
+
     created_menus: list[Menu] = []
     for name, parent_name, mtype, path, component, permission, icon, sort, i18n_key in menu_specs:
         target_name = parent_name or parent.name  # None = 挂到顶级目录下（品牌名随库而定）

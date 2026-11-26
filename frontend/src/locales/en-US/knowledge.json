@@ -301,7 +301,8 @@
     "typeWeb": "Web",
     "typePaper": "Paper",
     "typeResearch": "Research",
-    "typeChat": "Chat"
+    "typeChat": "Chat",
+    "docUnit": "docs"
   },
   "push": {
     "tabPush": "Doc Push",

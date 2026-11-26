@@ -301,7 +301,8 @@
     "typeWeb": "网页",
     "typePaper": "论文",
     "typeResearch": "调研",
-    "typeChat": "聊天"
+    "typeChat": "聊天",
+    "docUnit": "份文档"
   },
   "push": {
     "tabPush": "文档推送",

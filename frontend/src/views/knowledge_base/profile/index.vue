@@ -447,7 +447,7 @@ onMounted(() => {
 .hero-meta {
   display: flex;
   align-items: center;
-  gap: 20px;
+  gap: 24px;
   margin-top: 14px;
 }
 
@@ -565,8 +565,19 @@ onMounted(() => {
   margin: 4px 0;
 }
 
+/* 缩进对齐：列表圆点回归内容层级（全局 reset 清了 ul 的 padding，
+   导致 ::marker 溢出到卡片内边距之外、比标题更靠左） */
+.profile-body :deep(ul),
+.profile-body :deep(ol) {
+  padding-left: 1.3em;
+}
+
 .profile-body :deep(li) {
   margin: 3px 0;
+}
+
+.profile-body :deep(li::marker) {
+  color: var(--el-text-color-secondary);
 }
 
 .profile-empty {
@@ -713,7 +724,7 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 6px;
-  width: 110px;
+  width: 150px;
   flex-shrink: 0;
 }
 
