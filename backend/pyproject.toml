@@ -28,16 +28,14 @@ dependencies = [
     "trafilatura>=2.0.0",
     "arxiv>=4.0.0",
     "pyalex>=0.15.0",
-    # knowledge_base 插件：文档上传解析（PDF/DOCX）
+    # knowledge_base 插件：文档上传解析（PDF/DOCX）与联网采集
     "pypdf>=5.0.0",
     "python-docx>=1.1.0",
+    # knowledge_base 插件：JS 渲染站点爬取（用户决策 D3：直接集成；未装浏览器时自动降级轻量引擎）
+    "crawl4ai>=0.7.0",
 ]
 
 [project.optional-dependencies]
-knowledge-render = [
-    # 知识库插件可选渲染通道（JS 站点）：Apache-2.0，装不装均不影响核心
-    "crawl4ai>=0.7.0",
-]
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",

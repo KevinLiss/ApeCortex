@@ -223,6 +223,62 @@
                   <el-switch v-model="enableTools" size="small" />
                 </div>
               </el-tooltip>
+              <!-- 知识库配置（ApeCortex） -->
+              <el-popover
+                v-model:visible="kbPrefsVisible"
+                placement="top-start"
+                :width="300"
+                trigger="click"
+              >
+                <template #reference>
+                  <el-tooltip content="知识库召回配置（记忆/词条注入）" placement="top">
+                    <div class="tools-toggle" :class="{ 'kb-active': kbPrefs.auto_inject }">
+                      <el-icon :size="14"><Collection /></el-icon>
+                      <span>知识库</span>
+                      <el-badge v-if="kbPrefs.auto_inject" is-dot class="kb-dot-badge" />
+                    </div>
+                  </el-tooltip>
+                </template>
+                <div class="kb-prefs-panel">
+                  <div class="kb-prefs-title">知识库召回配置</div>
+                  <div class="kb-prefs-row">
+                    <span class="kb-prefs-label">记忆召回</span>
+                    <el-switch v-model="kbPrefs.memory_enabled" size="small" @change="saveKbPrefs" />
+                  </div>
+                  <div class="kb-prefs-row">
+                    <div>
+                      <div class="kb-prefs-label">自动注入</div>
+                      <div class="kb-prefs-tip">每轮自动注入相关记忆与词条（消耗更多 token）</div>
+                    </div>
+                    <el-switch v-model="kbPrefs.auto_inject" size="small" @change="saveKbPrefs" />
+                  </div>
+                  <div class="kb-prefs-divider"></div>
+                  <div class="kb-prefs-row">
+                    <span class="kb-prefs-label">召回范围</span>
+                    <el-select v-model="kbPrefs.recall_scope" size="small" style="width: 130px" @change="saveKbPrefs">
+                      <el-option label="不启用" value="off" />
+                      <el-option label="个人全部" value="private" />
+                      <el-option label="指定空间" value="space" />
+                      <el-option label="公开库" value="public" />
+                    </el-select>
+                  </div>
+                  <div v-if="kbPrefs.recall_scope === 'space'" class="kb-prefs-row">
+                    <span class="kb-prefs-label">目标空间</span>
+                    <el-select
+                      v-model="kbPrefs.recall_space_id"
+                      size="small"
+                      style="width: 130px"
+                      :disabled="!kbSpaces.length"
+                      @change="saveKbPrefs"
+                    >
+                      <el-option v-for="s in kbSpaces" :key="s.id" :value="s.id" :label="s.name" />
+                    </el-select>
+                  </div>
+                  <div class="kb-prefs-tip kb-prefs-foot">
+                    关闭自动注入时仍可用 kb_query 工具按需检索。
+                  </div>
+                </div>
+              </el-popover>
               <span class="char-count" v-if="inputText.length">{{ inputText.length }}</span>
               <!-- 会话操作（收纳进输入框） -->
               <template v-if="activeSessionId != null">
@@ -290,6 +346,9 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   getAllProviders,
   getChatSessionMessages,
+  getKbChatPrefs,
+  getKbSpaces,
+  putKbChatPrefs,
 } from '@/api'
 import { useAiChatStore } from '@/stores/aiChat'
 import { marked } from 'marked'
@@ -341,6 +400,39 @@ interface ChatSessionItem {
 
 const store = useAiChatStore()
 const router = useRouter()
+
+// 知识库偏好（ApeCortex）：插件后端持久化
+const kbPrefsVisible = ref(false)
+const kbPrefs = ref<any>({
+  recall_scope: 'private',
+  recall_space_id: 0,
+  memory_enabled: true,
+  auto_inject: false,
+})
+const kbSpaces = ref<any[]>([])
+
+async function loadKbPrefs() {
+  try {
+    const res: any = await getKbChatPrefs()
+    if (res) kbPrefs.value = { ...kbPrefs.value, ...res }
+  } catch { /* 插件未装/未授权：静默降级，入口仅作为普通配置 */ }
+  try {
+    const sp: any = await getKbSpaces()
+    kbSpaces.value = (sp?.items ?? []).filter((s: any) => s.owned)
+  } catch { /* 同上 */ }
+}
+
+async function saveKbPrefs() {
+  try {
+    await putKbChatPrefs({
+      recall_scope: kbPrefs.value.recall_scope,
+      recall_space_id: kbPrefs.value.recall_space_id || 0,
+      memory_enabled: kbPrefs.value.memory_enabled,
+      auto_inject: kbPrefs.value.auto_inject,
+    })
+    ElMessage.success('知识库配置已保存')
+  } catch { /* 拦截器已提示 */ }
+}
 
 // 会话列表来自全局 store（切页面后状态仍在）
 const sessions = computed(() => store.sessions)
@@ -916,7 +1008,7 @@ function onResize() {
 
 onMounted(async () => {
   window.addEventListener('resize', onResize)
-  await Promise.all([loadProviders(), loadSessions()])
+  await Promise.all([loadProviders(), loadSessions(), loadKbPrefs()])
   // 清理卸载期间滞留的终态 run（历史里已含其内容）
   store.sweepTerminalRuns()
   // 恢复上次会话视图（含运行中的 run 续流）
@@ -1679,6 +1771,46 @@ html.dark .session-item.archived .session-item-title {
   font-size: 12px;
   color: var(--text-secondary, #909399);
   cursor: default;
+}
+.tools-toggle.kb-active {
+  color: var(--el-color-primary, #409eff);
+}
+.kb-dot-badge {
+  transform: scale(0.8);
+  margin-left: -2px;
+}
+
+/* 知识库偏好弹层 */
+.kb-prefs-panel {
+  font-size: 13px;
+}
+.kb-prefs-title {
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+.kb-prefs-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.kb-prefs-label {
+  font-size: 13px;
+  color: var(--el-text-color-primary);
+}
+.kb-prefs-tip {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--el-text-color-secondary);
+  margin-top: 2px;
+}
+.kb-prefs-divider {
+  border-top: 1px dashed var(--el-border-color-lighter);
+  margin: 4px 0 10px;
+}
+.kb-prefs-foot {
+  margin-top: 4px;
 }
 .char-count {
   font-size: 11px;

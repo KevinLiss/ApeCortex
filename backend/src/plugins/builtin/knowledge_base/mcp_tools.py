@@ -147,7 +147,13 @@ def register_knowledge_base_mcp_tools() -> None:
         handler=_kb_research,
         plugin_name="knowledge_base",
     )
-    logger.info("Registered 8 knowledge_base MCP tools (P0×2 + P1×2 + P2×4)")
+    mcp_manager.register_tool(
+        name="kb_crawl_site",
+        description="爬取一个网站（同域多页）聚合为知识文档存入个人知识库，后台自动拆解词条（需联网开关）",
+        handler=_kb_crawl_site,
+        plugin_name="knowledge_base",
+    )
+    logger.info("Registered 9 knowledge_base MCP tools (P0×2 + P1×2 + P2×4 + N3×1)")
 
 
 async def _kb_collect_web(url: str, user: User | None = None) -> str:
@@ -160,12 +166,48 @@ async def _kb_collect_web(url: str, user: User | None = None) -> str:
     if user is None:
         return json.dumps({"ok": False, "msg": "缺少用户上下文"}, ensure_ascii=False)
     from src.plugins.builtin.knowledge_base.collector.web import (
-        fetch_page, get_domain_allowlist, get_web_enabled,
+        fetch_page,
+        get_domain_allowlist,
+        get_web_enabled,
     )
     if not await get_web_enabled(user.id):
         return json.dumps({"ok": False, "msg": "联网开关未开启（知识库设置）"}, ensure_ascii=False)
     allow = await get_domain_allowlist(user.id)
     result = await fetch_page(url, extra_allow=allow)
+    return json.dumps(result, ensure_ascii=False)
+
+
+async def _kb_crawl_site(
+    url: str,
+    max_pages: int = 20,
+    max_depth: int = 2,
+    space_id: int = 0,
+    title: str = "",
+    user: User | None = None,
+) -> str:
+    """爬取一个网站（同域多页 BFS），聚合为知识文档存入个人知识库并自动拆解词条。
+
+    适合文档站/博客站批量采集：给起始页地址即可，同域链接自动跟进。
+    JS 渲染站点在安装渲染引擎（crawl4ai）后可采；未装时静态页仍可采。
+
+    Args:
+        url: 起始页地址（http/https，爬取范围限同域名）
+        max_pages: 总页数上限（默认 20，最大 50）
+        max_depth: 链接跟进深度（默认 2，最大 3）
+        space_id: 存入哪个知识空间（0=默认空间）
+        title: 文档标题（留空自动用站点名）
+        user: 运行时注入的当前用户（勿在调用时传入）
+    """
+    if user is None:
+        return json.dumps({"ok": False, "msg": "缺少用户上下文"}, ensure_ascii=False)
+    from src.plugins.builtin.knowledge_base.collector.site import crawl_site
+    from src.plugins.builtin.knowledge_base.collector.web import get_domain_allowlist
+
+    allow = await get_domain_allowlist(user.id)
+    result = await crawl_site(
+        user.id, url, max_pages=max_pages, max_depth=max_depth,
+        space_id=space_id, title=title, extra_allow=allow,
+    )
     return json.dumps(result, ensure_ascii=False)
 
 

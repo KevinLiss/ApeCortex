@@ -62,7 +62,7 @@ class KnowledgeBasePlugin(PluginInterface):
         "私有/共享/公开空间与 PR 式晋升、三通道召回、联网采集与学术深度调研、"
         "公开库只读出口与 MCP 知识接口。"
     )
-    version = "0.6.0"
+    version = "0.7.0"
     author = "ApeAdmin"
 
     # ── 生命周期：安装（建表 + seed）──────────────────
@@ -88,6 +88,13 @@ class KnowledgeBasePlugin(PluginInterface):
 
         from src.db import engine
         from src.models import Menu
+
+        # 还原宿主 runner 补丁（N3 自动注入）
+        try:
+            from src.plugins.builtin.knowledge_base.pipeline.chat_prefs import unpatch_runner_context
+            unpatch_runner_context()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"[KnowledgeBase] 自动注入补丁还原跳过: {exc}")
 
         async with engine.begin() as conn:
             await conn.run_sync(
@@ -127,6 +134,13 @@ class KnowledgeBasePlugin(PluginInterface):
             loop.create_task(_reseed_menus())
         except RuntimeError:
             pass
+
+        # N3 自动注入：运行时包装宿主 runner._build_context（零宿主源码侵入，禁用时还原）
+        try:
+            from src.plugins.builtin.knowledge_base.pipeline.chat_prefs import patch_runner_context
+            patch_runner_context()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"[KnowledgeBase] 自动注入补丁挂接跳过: {exc}")
 
     # ── 生命周期：注册路由 + 事件 ──────────────────────
     def register(self, app: FastAPI) -> None:

@@ -350,3 +350,7 @@ export const getMyKbSubmissions = () => request.get('/knowledge-base/submissions
 export const getKbSubmission = (id: number) => request.get(`/knowledge-base/submissions/${id}`)
 export const reviewKbSubmission = (id: number, data: any) => request.post(`/knowledge-base/submissions/${id}/review`, data)
 export const disposeKbSubmission = (id: number, data: any) => request.post(`/knowledge-base/submissions/${id}/dispose`, data)
+
+// ---- Knowledge Base N3：聊天知识库偏好 ----
+export const getKbChatPrefs = () => request.get('/knowledge-base/chat-prefs')
+export const putKbChatPrefs = (data: any) => request.put('/knowledge-base/chat-prefs', data)

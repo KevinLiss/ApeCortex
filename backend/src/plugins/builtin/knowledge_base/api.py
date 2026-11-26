@@ -18,10 +18,35 @@ from src.core.exceptions import success_response
 from src.db import get_db
 from src.models import User
 from src.plugins.builtin.knowledge_base.models import KbMemoryItem, KbProfile
+from src.plugins.builtin.knowledge_base.pipeline import chat_prefs as chat_prefs_pipeline
 from src.plugins.builtin.knowledge_base.pipeline import memory as memory_pipeline
 from src.plugins.builtin.knowledge_base.schemas import MemoryOut, ProfileOut
 
 router = APIRouter(prefix="/knowledge-base", tags=["AI 知识库"])
+
+
+# ---------------------------------------------------------------- 聊天偏好（N3）
+
+@router.get("/chat-prefs")
+async def get_my_chat_prefs(
+    user: Annotated[User, Depends(get_current_user)],
+    _perm: Annotated[User, Depends(_require_perm("knowledge_base:profile:list"))],
+):
+    """当前用户的聊天知识库偏好（召回范围/记忆开关/自动注入）。"""
+    return success_response(data=await chat_prefs_pipeline.get_chat_prefs(user.id))
+
+
+@router.put("/chat-prefs")
+async def put_chat_prefs(
+    body: dict,
+    user: Annotated[User, Depends(get_current_user)],
+    _perm: Annotated[User, Depends(_require_perm("knowledge_base:profile:list"))],
+):
+    """保存聊天知识库偏好。"""
+    result = await chat_prefs_pipeline.set_chat_prefs(user.id, body or {})
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("msg"))
+    return success_response(data=await chat_prefs_pipeline.get_chat_prefs(user.id), msg="偏好已保存")
 
 
 @router.get("/memories")
