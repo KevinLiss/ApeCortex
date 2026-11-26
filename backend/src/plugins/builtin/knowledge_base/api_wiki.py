@@ -28,9 +28,11 @@ from src.plugins.builtin.knowledge_base.pipeline.compiler import (
 )
 from src.plugins.builtin.knowledge_base.pipeline.ingest_api import (
     create_space,
+    delete_space,
     get_space_role,
     ingest_doc,
     list_spaces,
+    update_space,
 )
 
 router = APIRouter(prefix="/knowledge-base", tags=["AI 知识库"])
@@ -60,6 +62,35 @@ async def post_space(
     if not result.get("ok"):
         raise HTTPException(status_code=400, detail=result.get("msg"))
     return success_response(data=result, msg="空间已创建")
+
+
+@router.put("/spaces/{space_id}")
+async def put_space(
+    space_id: int,
+    body: dict,
+    user: Annotated[User, Depends(get_current_user)],
+    _perm: Annotated[User, Depends(_require_perm("knowledge_base:space:update"))],
+):
+    """编辑空间名称/描述（仅空间 owner）。"""
+    result = await update_space(
+        user.id, space_id, body.get("name", ""), body.get("description", "")
+    )
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("msg"))
+    return success_response(data=result, msg="空间已更新")
+
+
+@router.delete("/spaces/{space_id}")
+async def remove_space(
+    space_id: int,
+    user: Annotated[User, Depends(get_current_user)],
+    _perm: Annotated[User, Depends(_require_perm("knowledge_base:space:delete"))],
+):
+    """删除空间及其全部内容（仅 owner；知识中心系统库拒删）。"""
+    result = await delete_space(user.id, space_id)
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("msg"))
+    return success_response(data=result, msg="空间已删除")
 
 
 @router.post("/spaces/{space_id}/docs")

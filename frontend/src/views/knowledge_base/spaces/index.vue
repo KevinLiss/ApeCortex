@@ -35,6 +35,19 @@
               <div class="space-meta">
                 <div class="space-name">{{ s.name }}</div>
               </div>
+              <el-dropdown trigger="click" class="space-more" @command="(cmd: string) => onSpaceCmd(cmd, s)">
+                <span class="space-more-btn" title="更多操作" @click.stop>
+                  <el-icon :size="16"><MoreFilled /></el-icon>
+                </span>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item command="edit">{{ t('knowledge.spaces.rename') }}</el-dropdown-item>
+                    <el-dropdown-item command="delete" divided class="danger-item">
+                      {{ t('knowledge.spaces.remove') }}
+                    </el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
             </div>
             <div class="space-desc">{{ s.description || '—' }}</div>
             <div class="space-footer">
@@ -51,7 +64,7 @@
         </el-col>
       </el-row>
 
-      <!-- 新建空间弹窗（个人知识库，无类型概念） -->
+      <!-- 新建空间弹窗（个人知识库，无类型概念；复用于编辑模式） -->
       <el-dialog v-model="createVisible" :title="t('knowledge.spaces.create')" width="420px">
         <el-form label-position="top">
           <el-form-item :label="t('knowledge.spaces.name')">
@@ -64,6 +77,22 @@
         <template #footer>
           <el-button @click="createVisible = false">{{ t('common.action.cancel') }}</el-button>
           <el-button type="primary" :loading="creating" @click="handleCreate">{{ t('common.action.confirm') }}</el-button>
+        </template>
+      </el-dialog>
+
+      <!-- 编辑空间弹窗 -->
+      <el-dialog v-model="editVisible" :title="t('knowledge.spaces.editTitle')" width="420px">
+        <el-form label-position="top">
+          <el-form-item :label="t('knowledge.spaces.name')">
+            <el-input v-model="editName" :placeholder="t('knowledge.spaces.namePlaceholder')" maxlength="100" />
+          </el-form-item>
+          <el-form-item :label="t('knowledge.spaces.desc')">
+            <el-input v-model="editDesc" type="textarea" :rows="2" :placeholder="t('knowledge.spaces.descPlaceholder')" maxlength="500" />
+          </el-form-item>
+        </el-form>
+        <template #footer>
+          <el-button @click="editVisible = false">{{ t('common.action.cancel') }}</el-button>
+          <el-button type="primary" :loading="saving" @click="handleSave">{{ t('common.action.confirm') }}</el-button>
         </template>
       </el-dialog>
     </template>
@@ -91,6 +120,14 @@
           <div class="stat-block">
             <span class="stat-num">{{ spaceSummary?.page_count ?? 0 }}</span>
             <span class="stat-label">{{ t('knowledge.spaces.pages') }}</span>
+          </div>
+          <div class="detail-actions">
+            <el-button text :icon="EditPen" @click="openEdit(currentSpace)">
+              {{ t('knowledge.spaces.rename') }}
+            </el-button>
+            <el-button text type="danger" :icon="Delete" @click="confirmDelete(currentSpace)">
+              {{ t('knowledge.spaces.remove') }}
+            </el-button>
           </div>
         </div>
       </div>
@@ -125,10 +162,10 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
-import { ArrowLeft, Document, Folder, Plus, Right } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { ArrowLeft, Delete, Document, EditPen, Folder, MoreFilled, Plus, Right } from '@element-plus/icons-vue'
 
-import { createKbSpace, getKbSpaceDocs, getKbSpaces } from '@/api'
+import { createKbSpace, deleteKbSpace, getKbSpaceDocs, getKbSpaces, updateKbSpace } from '@/api'
 import DocsTab from './components/DocsTab.vue'
 import PagesTab from './components/PagesTab.vue'
 
@@ -141,6 +178,11 @@ const createVisible = ref(false)
 const newName = ref('')
 const newDesc = ref('')
 const creating = ref(false)
+const editVisible = ref(false)
+const editName = ref('')
+const editDesc = ref('')
+const editTarget = ref<any>(null)
+const saving = ref(false)
 const activeTab = ref('docs')
 const spaceSummary = ref<any>(null)
 const pagesTabRef = ref<any>(null)
@@ -206,6 +248,50 @@ async function handleCreate() {
   } catch { /* 拦截器已提示 */ } finally {
     creating.value = false
   }
+}
+
+function onSpaceCmd(cmd: string, s: any) {
+  if (cmd === 'edit') openEdit(s)
+  else if (cmd === 'delete') confirmDelete(s)
+}
+
+function openEdit(s: any) {
+  editTarget.value = s
+  editName.value = s.name
+  editDesc.value = s.description || ''
+  editVisible.value = true
+}
+
+async function handleSave() {
+  if (!editTarget.value || !editName.value.trim()) return
+  saving.value = true
+  try {
+    await updateKbSpace(editTarget.value.id, {
+      name: editName.value.trim(), description: editDesc.value.trim(),
+    })
+    ElMessage.success(t('knowledge.spaces.updated'))
+    editVisible.value = false
+    fetchSpaces()
+  } catch { /* 拦截器已提示 */ } finally {
+    saving.value = false
+  }
+}
+
+async function confirmDelete(s: any) {
+  try {
+    await ElMessageBox.confirm(
+      t('knowledge.spaces.removeConfirm', { name: s.name }),
+      t('knowledge.spaces.removeConfirmTitle'),
+      { type: 'warning', confirmButtonText: t('common.action.delete'), cancelButtonText: t('common.action.cancel') },
+    )
+  } catch { /* 取消 */ return }
+  try {
+    await deleteKbSpace(s.id)
+    ElMessage.success(t('knowledge.spaces.removed'))
+    // 若删除的是当前打开的空间 → 回列表
+    if (currentSpaceId.value === s.id) backToList()
+    fetchSpaces()
+  } catch { /* 拦截器已提示（hub 拒删等） */ }
 }
 
 watch(currentSpaceId, () => {
@@ -293,6 +379,38 @@ onMounted(() => {
 
 .space-meta {
   min-width: 0;
+  flex: 1;
+}
+
+/* 卡片右上角更多操作（悬停可见，避免误触） */
+.space-more {
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.space-card:hover .space-more {
+  opacity: 1;
+}
+
+.space-more-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  color: var(--el-text-color-secondary);
+  cursor: pointer;
+}
+
+.space-more-btn:hover {
+  color: var(--el-color-primary);
+  background: var(--el-fill-color-light);
+}
+
+.danger-item {
+  color: var(--el-color-danger);
 }
 
 .space-name {
@@ -392,7 +510,14 @@ onMounted(() => {
 
 .detail-stats {
   display: flex;
+  align-items: center;
   gap: 24px;
+}
+
+.detail-actions {
+  display: flex;
+  gap: 4px;
+  margin-left: 8px;
 }
 
 .stat-block {

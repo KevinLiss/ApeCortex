@@ -185,3 +185,88 @@ async def list_spaces(user_id: int) -> list[dict]:
         }
         for s in rows
     ]
+
+
+async def update_space(user_id: int, space_id: int, name: str, description: str = "") -> dict:
+    """编辑空间名称/描述（仅 owner；hub 空间无人类 owner 不可编辑）。"""
+    from src.plugins.builtin.knowledge_base.models import KbSpace
+
+    name = (name or "").strip()[:100]
+    if not name:
+        return {"ok": False, "msg": "空间名不能为空"}
+    ok, msg = await ensure_owned_space(user_id, space_id, need_owner=True)
+    if not ok:
+        return {"ok": False, "msg": msg}
+    async with SessionLocal() as db:
+        space = await db.get(KbSpace, space_id)
+        if space is None:
+            return {"ok": False, "msg": "空间不存在"}
+        space.name = name
+        space.description = (description or "")[:2000]
+        await db.commit()
+    return {"ok": True, "space_id": space_id}
+
+
+async def delete_space(user_id: int, space_id: int) -> dict:
+    """删除空间及其全部内容（仅 owner；级联清词条/修订/文档/任务/原始文件）。
+
+    防呆：知识中心（hub，owner_user_id=0）是系统单例，拒绝删除。
+    推送单（kb_public_submission）是全局留痕，仅存 source_space_id 溯源引用，不级联。
+    """
+    from src.plugins.builtin.knowledge_base.models import (
+        KbDocSource,
+        KbJob,
+        KbSpace,
+        KbWikiPage,
+        KbWikiRevision,
+    )
+
+    raw_exts: dict[int, str] = {}
+    async with SessionLocal() as db:
+        space = await db.get(KbSpace, space_id)
+        if space is None or space.status != "active":
+            return {"ok": False, "msg": "空间不存在或已归档"}
+        if space.owner_user_id == 0:
+            return {"ok": False, "msg": "知识中心是系统公共库，不可删除"}
+        if space.owner_user_id != user_id:
+            return {"ok": False, "msg": "仅空间所有者可删除"}
+
+        # 收集文档原始文件扩展名（会后置清理文件系统）
+        docs = list((await db.execute(
+            select(KbDocSource).where(KbDocSource.space_id == space_id)
+        )).scalars().all())
+        raw_exts = {d.id: (d.file_ext or "").lower() for d in docs}
+
+        # 级联删除：修订（经词条关联）→ 词条 → 文档 → 任务 → 空间
+        await db.execute(
+            KbWikiRevision.__table__.delete().where(
+                KbWikiRevision.page_id.in_(
+                    select(KbWikiPage.id).where(KbWikiPage.space_id == space_id)
+                )
+            )
+        )
+        await db.execute(
+            KbWikiPage.__table__.delete().where(KbWikiPage.space_id == space_id)
+        )
+        await db.execute(
+            KbDocSource.__table__.delete().where(KbDocSource.space_id == space_id)
+        )
+        await db.execute(
+            KbJob.__table__.delete().where(KbJob.space_id == space_id)
+        )
+        await db.delete(space)
+        await db.commit()
+
+    # 后置清理：上传的原始文件（失败不影响删除结果，留残文件无害）
+    from src.plugins.builtin.knowledge_base.api_docs import _raw_dir
+
+    try:
+        raw_dir = _raw_dir()
+        for doc_id, ext in raw_exts.items():
+            if ext:
+                (raw_dir / f"{doc_id}.{ext}").unlink(missing_ok=True)
+    except Exception as exc:  # noqa: BLE001 — 文件清理失败不回滚删除
+        logger.warning(f"[KnowledgeBase] 空间 {space_id} 原始文件清理失败（忽略）: {exc}")
+
+    logger.info(f"[KnowledgeBase] 空间 {space_id} 已删除（含 {len(raw_exts)} 份文档及词条/任务）")
+    return {"ok": True, "space_id": space_id}

@@ -296,6 +296,8 @@ export const getKbStats = () => request.get('/knowledge-base/stats')
 // ---- Knowledge Base Wiki (P1) ----
 export const getKbSpaces = () => request.get('/knowledge-base/spaces')
 export const createKbSpace = (data: any) => request.post('/knowledge-base/spaces', data)
+export const updateKbSpace = (spaceId: number, data: any) => request.put(`/knowledge-base/spaces/${spaceId}`, data)
+export const deleteKbSpace = (spaceId: number) => request.delete(`/knowledge-base/spaces/${spaceId}`)
 export const uploadKbDoc = (spaceId: number, data: any) => request.post(`/knowledge-base/spaces/${spaceId}/docs`, data)
 export const getKbPages = (spaceId: number, params: any) => request.get(`/knowledge-base/spaces/${spaceId}/pages`, { params })
 export const getKbPage = (pageId: number) => request.get(`/knowledge-base/pages/${pageId}`)

@@ -514,6 +514,82 @@ async def test_ingest_rejects_short(wiki_env):
     assert not r["ok"]
 
 
+# ---------------------------------------------------------------- 空间编辑/删除
+
+async def test_space_update_owner_only(wiki_env):
+    from src.plugins.builtin.knowledge_base.pipeline import ingest_api
+
+    sid = (await ingest_api.create_space(1, "原名", "原描述"))["space_id"]
+    # 空名拒绝
+    assert not (await ingest_api.update_space(1, sid, "  "))["ok"]
+    # 非 owner 拒
+    assert not (await ingest_api.update_space(2, sid, "越权改名"))["ok"]
+    # owner 改名改描述
+    r = await ingest_api.update_space(1, sid, "新名", "新描述")
+    assert r["ok"]
+    from sqlalchemy import select as _select
+
+    from src.plugins.builtin.knowledge_base.models import KbSpace
+    async with wiki_env() as db:
+        space = (await db.execute(_select(KbSpace).where(KbSpace.id == sid))).scalars().one()
+        assert space.name == "新名" and space.description == "新描述"
+
+
+async def test_space_delete_cascades(wiki_env):
+    from sqlalchemy import select as _select
+
+    from src.plugins.builtin.knowledge_base.models import (
+        KbDocSource,
+        KbJob,
+        KbSpace,
+        KbWikiPage,
+        KbWikiRevision,
+    )
+    from src.plugins.builtin.knowledge_base.pipeline import ingest_api
+
+    sid = (await ingest_api.create_space(1, "待删空间", "描述"))["space_id"]
+    async with wiki_env() as db:
+        doc = KbDocSource(space_id=sid, title="文档", content="内容" * 20,
+                          content_hash="del1", source_type="upload", char_count=40)
+        page = KbWikiPage(space_id=sid, slug="del-page", title="词条",
+                          body_md="正文" * 20, status="live", confidence=0.9, source_count=3)
+        db.add_all([doc, page])
+        await db.flush()
+        db.add(KbWikiRevision(page_id=page.id, version=1, body_md="正文",
+                              edit_source="pipeline", is_machine_snapshot=True))
+        db.add(KbJob(user_id=1, space_id=sid, job_type="wiki_ingest",
+                     payload="{}", status="pending"))
+        await db.commit()
+        page_id, doc_id = page.id, doc.id
+
+    # 非 owner 拒删
+    assert not (await ingest_api.delete_space(2, sid))["ok"]
+
+    # owner 删除 → 级联清空
+    r = await ingest_api.delete_space(1, sid)
+    assert r["ok"]
+    async with wiki_env() as db:
+        assert (await db.execute(_select(KbDocSource).where(KbDocSource.id == doc_id))).scalars().first() is None
+        assert (await db.execute(_select(KbWikiPage).where(KbWikiPage.id == page_id))).scalars().first() is None
+        assert (await db.execute(
+            _select(KbWikiRevision).where(KbWikiRevision.page_id == page_id)
+        )).scalars().first() is None
+        assert (await db.execute(
+            _select(KbJob).where(KbJob.space_id == sid)
+        )).scalars().first() is None
+        assert (await db.get(KbSpace, sid)) is None
+
+
+async def test_space_delete_hub_rejected(wiki_env):
+    """知识中心是系统公共库（owner=0），不可删除。"""
+    from src.plugins.builtin.knowledge_base.pipeline import hub as hub_mod
+    from src.plugins.builtin.knowledge_base.pipeline import ingest_api
+
+    hub_id = await hub_mod.get_hub_space_id()
+    r = await ingest_api.delete_space(1, hub_id)
+    assert not r["ok"] and "知识中心" in r["msg"]
+
+
 # =================================================================
 # P2：联网采集护栏 + 学术源 + 调研管线
 # =================================================================
