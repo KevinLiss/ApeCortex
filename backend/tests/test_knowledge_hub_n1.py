@@ -24,6 +24,7 @@ from src.plugins.builtin.knowledge_base.api_hub import (
 )
 from src.plugins.builtin.knowledge_base.models import (
     KbCategory,
+    KbDocSource,
     KbSpace,
     KbWikiPage,
     PluginBase,
@@ -116,14 +117,24 @@ async def test_ensure_columns_adds_category_id(tmp_path):
             "owner_user_id INTEGER, description TEXT, page_count INTEGER, status VARCHAR(20),"
             "created_at TIMESTAMP, updated_at TIMESTAMP)"
         )))
+        await conn.run_sync(lambda c: c.execute(text(
+            "CREATE TABLE kb_doc_source ("
+            "id INTEGER PRIMARY KEY, space_id INTEGER, title VARCHAR(200), content TEXT,"
+            "content_hash VARCHAR(64), url VARCHAR(1000), source_type VARCHAR(20),"
+            "char_count INTEGER, compiled_at TIMESTAMP, created_at TIMESTAMP, updated_at TIMESTAMP)"
+        )))
     async with engine.begin() as conn:
         await conn.run_sync(_ensure_columns)
     async with engine.connect() as conn:
-        cols = await conn.run_sync(
+        space_cols = await conn.run_sync(
             lambda c: [row[1] for row in c.execute(text("PRAGMA table_info(kb_space)"))]
         )
+        doc_cols = await conn.run_sync(
+            lambda c: [row[1] for row in c.execute(text("PRAGMA table_info(kb_doc_source)"))]
+        )
     await engine.dispose()
-    assert "category_id" in cols
+    assert "category_id" in space_cols
+    assert "file_ext" in doc_cols
 
 
 # ---------------------------------------------------------------- 菜单迁移自愈
@@ -276,3 +287,55 @@ async def test_hub_spaces_and_pages_filters(hub_env):
         # 指定库
         res_lib = await hub_pages(db=db, user=_StubUser(), _perm=None, space_id=a_id, category_id=None, search="", page=1, page_size=20)
         assert {p["title"] for p in res_lib["data"]["items"]} == {"A 公开词条"}
+
+
+# ---------------------------------------------------------------- 下载（N2.5）
+
+@pytest.mark.asyncio
+async def test_doc_download_filename_and_ext(hub_env, monkeypatch):
+    """下载：文件名净化 + 原始扩展名还原 + UTF-8 附件头。"""
+    from src.plugins.builtin.knowledge_base.api_docs import download_doc
+
+    class _U:
+        id = 1
+
+    async with hub_env() as db:
+        space = KbSpace(owner_user_id=1, name="私有", visibility="private")
+        db.add(space)
+        await db.flush()
+        doc = KbDocSource(
+            space_id=space.id, title="下载测试/文档 名", content="正文" * 30,
+            content_hash="dl1", source_type="upload", file_ext="pdf", char_count=60,
+        )
+        db.add(doc)
+        await db.commit()
+        sid, did = space.id, doc.id
+
+    import src.plugins.builtin.knowledge_base.api_docs as api_docs_mod
+
+    async def _fake_access(user_id, space_id, need_write=False):
+        return True, ""
+
+    monkeypatch.setattr(api_docs_mod, "ensure_space_access", _fake_access)
+
+    async with hub_env() as db:
+        resp = await download_doc(space_id=sid, doc_id=did, db=db, user=_U(), _perm=None)
+    assert resp.status_code == 200
+    cd = resp.headers["content-disposition"]
+    from urllib.parse import quote
+    assert f"attachment; filename*=UTF-8''{quote('下载测试_文档_名.pdf')}" == cd
+    assert "pdf" in resp.media_type
+
+    # 无 file_ext（聊天/网页型文档）→ md 降级
+    async with hub_env() as db:
+        doc2 = KbDocSource(
+            space_id=sid, title="聊天结论", content="结论" * 30,
+            content_hash="dl2", source_type="chat", char_count=60,
+        )
+        db.add(doc2)
+        await db.commit()
+        did2 = doc2.id
+    async with hub_env() as db:
+        resp2 = await download_doc(space_id=sid, doc_id=did2, db=db, user=_U(), _perm=None)
+    assert quote("聊天结论.md") in resp2.headers["content-disposition"]
+    assert "markdown" in resp2.media_type

@@ -198,6 +198,9 @@ class KbDocSource(IDMixin, TimestampMixin, PluginBase):
         String(20), nullable=False, default="upload",
         comment="来源: upload/chat/research/web/paper",
     )
+    file_ext: Mapped[str | None] = mapped_column(
+        String(10), nullable=True, comment="上传文件原始扩展名（供下载还原文件名）"
+    )
     char_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="字符数")
     compiled_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, comment="最近一次参与编译时间"

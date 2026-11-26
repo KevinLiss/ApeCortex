@@ -345,6 +345,11 @@ export const compileKbDoc = (spaceId: number, docId: number) => request.post(`/k
 // ---- Knowledge Base N2：公开库推送与审核 ----
 export const submitKbPublic = (spaceId: number, docId: number, data: any) => request.post(`/knowledge-base/spaces/${spaceId}/docs/${docId}/submit-public`, data)
 export const getKbPushTargets = () => request.get('/knowledge-base/submissions/targets')
+export const createKbPushTarget = (data: any) => request.post('/knowledge-base/submissions/targets', data)
+export const downloadKbDoc = (spaceId: number, docId: number) => request.get(
+  `/knowledge-base/spaces/${spaceId}/docs/${docId}/download`,
+  { responseType: 'blob' },
+)
 export const getKbSubmissions = (params?: any) => request.get('/knowledge-base/submissions', { params })
 export const getMyKbSubmissions = () => request.get('/knowledge-base/submissions/mine')
 export const getKbSubmission = (id: number) => request.get(`/knowledge-base/submissions/${id}`)

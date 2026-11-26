@@ -31,6 +31,9 @@ _COLUMN_MIGRATIONS: dict[str, list[tuple[str, str]]] = {
     "kb_space": [
         ("category_id", "INTEGER NULL"),
     ],
+    "kb_doc_source": [
+        ("file_ext", "VARCHAR(10) NULL"),
+    ],
 }
 
 

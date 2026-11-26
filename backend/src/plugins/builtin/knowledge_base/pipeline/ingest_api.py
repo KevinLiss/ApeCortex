@@ -98,12 +98,12 @@ async def ingest_doc(
     source_type: str = "chat",
     url: str | None = None,
     compile_now: bool = True,
+    file_ext: str | None = None,
 ) -> dict:
     """文档入库（私有空间）→（可选）触发后台编译任务。
 
     返回 {ok, doc_id, space_id, job_id?}。
     """
-    from datetime import datetime, timezone
 
     from src.plugins.builtin.knowledge_base.models import KbDocSource
 
@@ -141,6 +141,7 @@ async def ingest_doc(
             content_hash=content_hash,
             url=url or None,
             source_type=source_type if source_type in ("upload", "chat", "research", "web", "paper") else "upload",
+            file_ext=file_ext or None,
             char_count=len(content),
         )
         db.add(doc)

@@ -106,7 +106,14 @@
           <el-select v-model="promoteTarget" style="width: 100%" :placeholder="t('knowledge.pages.promoteTargetPlaceholder')">
             <el-option v-for="s in publicSpaces" :key="s.id" :value="s.id" :label="s.name" />
           </el-select>
-          <div v-if="!publicSpaces.length" class="promote-empty">{{ t('knowledge.pages.promoteNoTarget') }}</div>
+          <el-alert
+            v-if="!publicSpaces.length"
+            type="warning"
+            :closable="false"
+            show-icon
+            class="promote-empty-alert"
+            :title="t('knowledge.pages.promoteNoTarget')"
+          />
         </el-form-item>
         <el-form-item :label="t('knowledge.pages.promoteNote')">
           <el-input v-model="promoteNote" type="textarea" :rows="3" maxlength="500" />
@@ -297,11 +304,9 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.promote-empty {
-  margin-top: 6px;
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--el-text-color-secondary);
+.promote-empty-alert {
+  width: 100%;
+  margin-top: 8px;
 }
 
 .type-filter {

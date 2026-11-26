@@ -140,7 +140,7 @@
     "promoteGateFail": "Page below promotion gates (sources ≥ 3 and confidence ≥ 0.8)",
     "promoteSubmitted": "Promotion submitted, awaiting review",
     "promoteTargetPlaceholder": "Select a public space",
-    "promoteNoTarget": "No public space yet. Create one in Spaces first (maintainer permission required).",
+    "promoteNoTarget": "No public library yet. Create one in the \"Push to Public\" dialog, or ask a maintainer.",
     "promoteGateFailDetail": "Promotion gate not met: sources {sources}/3, confidence {confidence}%/80%",
     "published": "Published"
   },
@@ -302,7 +302,9 @@
     "typePaper": "Paper",
     "typeResearch": "Research",
     "typeChat": "Chat",
-    "docUnit": "docs"
+    "docUnit": "docs",
+    "download": "Download",
+    "downloaded": "Download started"
   },
   "push": {
     "tabPush": "Doc Push",
@@ -335,7 +337,13 @@
     "rejectPrompt": "Reject reason (optional)",
     "aiCategory": "AI-suggested category",
     "aiReason": "AI analysis",
-    "empty": "No pending submissions"
+    "empty": "No pending submissions",
+    "createTarget": "New Library",
+    "createTargetTitle": "Create Public Library",
+    "createTargetConfirm": "Create",
+    "targetCreated": "Public library created",
+    "noTargetHint": "No public library yet; ask a maintainer to create one first",
+    "pushTargetPlaceholder": "Select a public library"
   },
   "violation": {
     "tabViolation": "Violation Disposal",

@@ -46,6 +46,7 @@ def _doc_out(d: KbDocSource, page_count: int = 0) -> dict:
         "title": d.title,
         "url": d.url,
         "source_type": d.source_type,
+        "file_ext": d.file_ext,
         "char_count": d.char_count,
         "compiled_at": d.compiled_at.isoformat() if d.compiled_at else None,
         "page_count": page_count,
@@ -172,16 +173,25 @@ async def upload_doc_file(
     user: Annotated[User, Depends(get_current_user)],
     _perm: Annotated[User, Depends(_require_perm("knowledge_base:doc:upload"))],
 ):
-    """文件上传入库：md/txt 直读，pdf（pypdf）、docx（python-docx）解析为文本。"""
+    """文件上传入库：md/txt 直读，pdf（pypdf）、docx（python-docx）解析为文本。
+
+    file_ext 记录原始扩展名，供下载还原文件名（文档正文入库为文本，下载时
+    以 Markdown 形式给出；上传型文档优先用原始扩展名）。
+    """
     data = await file.read()
     try:
         title, content = parse_file_to_text(file.filename or "", data)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    ext = ""
+    fname = file.filename or ""
+    if "." in fname:
+        ext = fname.rsplit(".", 1)[1].lower()[:10]
+
     result = await ingest_doc(
         user.id, space_id, title, content,
-        source_type="upload", url=None,
+        source_type="upload", url=None, file_ext=ext or None,
     )
     if not result.get("ok"):
         raise HTTPException(status_code=400, detail=result.get("msg"))
@@ -203,6 +213,64 @@ async def post_doc(
     if not result.get("ok"):
         raise HTTPException(status_code=400, detail=result.get("msg"))
     return success_response(data=result)
+
+
+# ---------------------------------------------------------------- 下载
+
+_DOC_DOWNLOAD_EXT = {
+    "md": "text/markdown",
+    "markdown": "text/markdown",
+    "txt": "text/plain",
+    "pdf": "application/pdf",
+    "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+}
+
+
+@router.get("/spaces/{space_id}/docs/{doc_id}/download")
+async def download_doc(
+    space_id: int,
+    doc_id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+    _perm: Annotated[User, Depends(_require_perm("knowledge_base:space:list"))],
+):
+    """下载文档正文（Markdown 文本流；上传型文档用原始扩展名还原文件名）。
+
+    说明：入库的是解析后文本而非原始二进制，下载给出的是可编辑的 .md/.txt；
+    pdf/docx 上传的下载同样给出解析后的 Markdown（保语义可编辑）。
+    """
+    ok, msg = await ensure_space_access(user.id, space_id, need_write=False)
+    if not ok:
+        raise HTTPException(status_code=403, detail=msg)
+
+    doc = (await db.execute(
+        select(KbDocSource).where(
+            KbDocSource.id == doc_id, KbDocSource.space_id == space_id
+        )
+    )).scalars().first()
+    if doc is None:
+        raise HTTPException(status_code=404, detail="文档不存在")
+
+    # 文件名：去除路径分隔符防注入，空格/斜杠替换
+    safe_title = (doc.title or "document").replace("/", "_").replace("\\", "_").replace(" ", "_")[:80]
+    ext = (doc.file_ext or "").lower()
+    if ext not in _DOC_DOWNLOAD_EXT:
+        ext = "md"  # 聊天/网页/调研等文本型文档统一 Markdown
+    media_type = _DOC_DOWNLOAD_EXT[ext]
+    filename = f"{safe_title}.{ext}"
+
+    from urllib.parse import quote
+
+    from fastapi.responses import Response
+
+    quoted = quote(filename)
+    return Response(
+        content=doc.content,
+        media_type=f"{media_type}; charset=utf-8",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{quoted}",
+        },
+    )
 
 
 # ---------------------------------------------------------------- 删除/重新编译

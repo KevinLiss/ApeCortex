@@ -140,7 +140,7 @@
     "promoteGateFail": "该词条未达晋升门槛（来源数≥3 且 置信度≥0.8）",
     "promoteSubmitted": "晋升申请已提交，等待审核",
     "promoteTargetPlaceholder": "选择公开空间",
-    "promoteNoTarget": "还没有公开空间。请先在「知识空间」创建公开空间（需维护者权限）。",
+    "promoteNoTarget": "还没有公开知识库。可在「推送公开库」弹窗内直接新建，或联系维护者创建。",
     "promoteGateFailDetail": "晋升门槛未达：来源 {sources}/3，置信度 {confidence}%/80%",
     "published": "已发布"
   },
@@ -302,7 +302,9 @@
     "typePaper": "论文",
     "typeResearch": "调研",
     "typeChat": "聊天",
-    "docUnit": "份文档"
+    "docUnit": "份文档",
+    "download": "下载",
+    "downloaded": "已开始下载"
   },
   "push": {
     "tabPush": "文档推送",
@@ -335,7 +337,13 @@
     "rejectPrompt": "拒绝理由（可选）",
     "aiCategory": "AI 建议分类",
     "aiReason": "AI 分析说明",
-    "empty": "暂无待审推送"
+    "empty": "暂无待审推送",
+    "createTarget": "新建公开库",
+    "createTargetTitle": "新建公开知识库",
+    "createTargetConfirm": "创建",
+    "targetCreated": "公开库已创建",
+    "noTargetHint": "尚无公开知识库，请维护者先创建后再推送",
+    "pushTargetPlaceholder": "选择公开知识库"
   },
   "violation": {
     "tabViolation": "违规处置",

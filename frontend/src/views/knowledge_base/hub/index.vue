@@ -163,6 +163,7 @@
       :title="pageDetail?.title || t('knowledge.hub.title')"
       size="52%"
       :z-index="2000"
+      class="kb-doc-drawer"
     >
       <div v-if="pageDetail" class="drawer-body">
         <div class="drawer-meta">
@@ -755,7 +756,11 @@ onMounted(async () => {
 
 /* 抽屉 */
 .drawer-body {
-  padding: 0 4px;
+  padding: 0;
+}
+
+:deep(.el-drawer__body) {
+  padding: 0 24px 24px;
 }
 
 .drawer-meta {
@@ -821,6 +826,23 @@ onMounted(async () => {
   margin: 10px 0 0;
   font-size: 12px;
   line-height: 1.6;
+  color: var(--el-text-color-secondary);
+}
+
+/* 引用列表：marker 挂在内容框内（全局 reset 清了 ul padding 会导致序号贴边溢出） */
+.detail-content :deep(ol),
+.detail-content :deep(ul),
+.page-body :deep(ol),
+.page-body :deep(ul),
+.doc-content :deep(ol),
+.doc-content :deep(ul) {
+  padding-left: 2em;
+  margin: 10px 0;
+  list-style-position: outside;
+}
+
+.detail-content :deep(li::marker),
+.page-body :deep(li::marker) {
   color: var(--el-text-color-secondary);
 }
 </style>

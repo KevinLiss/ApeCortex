@@ -59,7 +59,7 @@ async def my_submissions(
         .order_by(KbPublicSubmission.id.desc())
         .limit(50)
     )).scalars().all())
-    cat_names = _category_names(db, subs)
+    cat_names = await _category_names(db, subs)
     return success_response(data={
         "items": [push.submission_out(s, cat_names) for s in subs],
     })
@@ -93,7 +93,7 @@ async def list_submissions(
         base.order_by(KbPublicSubmission.id.desc())
         .offset((page - 1) * page_size).limit(page_size)
     )).scalars().all())
-    cat_names = _category_names(db, subs)
+    cat_names = await _category_names(db, subs)
     return success_response(data={
         "items": [push.submission_out(s, cat_names) for s in subs],
         "total": total, "page": page, "page_size": page_size,
@@ -116,15 +116,59 @@ async def list_push_targets(
     user: Annotated[User, Depends(get_current_user)],
     _perm: Annotated[User, Depends(_require_perm("knowledge_base:submission:submit"))],
 ):
-    """可选目标公开库列表（提交推送时的下拉数据）。"""
+    """可选目标公开库列表（提交推送时的下拉数据）。
+
+    附 can_create_public：有维护者权限的提交人可在推送弹窗内直接新建公开库
+    （无公开库时空态引导的关键交互——修复「推送没得选」）。
+    """
     spaces = list((await db.execute(
         select(KbSpace).where(
             KbSpace.visibility == "public", KbSpace.status == "active"
         ).order_by(KbSpace.id)
     )).scalars().all())
+    from src.core.deps import get_user_permissions
+
+    perms = get_user_permissions(user)
     return success_response(data={
         "items": [{"id": s.id, "name": s.name, "category_id": s.category_id} for s in spaces],
+        "can_create_public": "*" in perms or "knowledge_base:promotion:review" in perms,
     })
+
+
+@router.post("/submissions/targets")
+async def create_push_target(
+    body: dict,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+    _perm: Annotated[User, Depends(_require_perm("knowledge_base:promotion:review"))],
+):
+    """推送弹窗内快速新建公开库（维护者；权限与创建公开空间同源 promotion:review）。"""
+    from src.plugins.builtin.knowledge_base.pipeline.ingest_api import create_space
+
+    result = await create_space(
+        user.id,
+        str(body.get("name") or ""),
+        str(body.get("description") or ""),
+        visibility="public",
+    )
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("msg"))
+    space_id = result["space_id"]
+    if body.get("category_id"):
+        cat = (await db.execute(
+            select(KbCategory).where(KbCategory.id == int(body["category_id"]))
+        )).scalars().first()
+        if cat is None:
+            raise HTTPException(status_code=400, detail="分类不存在")
+        space = (await db.execute(
+            select(KbSpace).where(KbSpace.id == space_id)
+        )).scalars().first()
+        space.category_id = int(body["category_id"])
+        await db.commit()
+    return success_response(
+        data={"id": space_id, "name": str(body.get("name")), "category_id": body.get("category_id")},
+        msg="公开库已创建",
+    )
 
 
 @router.get("/submissions/{submission_id}")
