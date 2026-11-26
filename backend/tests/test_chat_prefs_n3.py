@@ -54,7 +54,7 @@ async def env(monkeypatch, tmp_path):
 async def test_chat_prefs_defaults_and_set(env):
     prefs = await cp.get_chat_prefs(USER_ID)
     assert prefs == {
-        "include_hub": True, "enabled_spaces": [],
+        "include_hub": True, "spaces_mode": "all", "enabled_spaces": [],
         "memory_enabled": True, "auto_inject": False,
     }
 
@@ -64,14 +64,23 @@ async def test_chat_prefs_defaults_and_set(env):
     assert (await cp.get_chat_prefs(USER_ID))["enabled_spaces"] == []
 
     ok = await cp.set_chat_prefs(USER_ID, {
-        "include_hub": False, "enabled_spaces": [1, 2, "x", 3],
+        "include_hub": False, "spaces_mode": "custom", "enabled_spaces": [1, 2, "x", 3],
         "memory_enabled": False, "auto_inject": True,
     })
     assert ok["ok"]
     prefs2 = await cp.get_chat_prefs(USER_ID)
     assert prefs2["include_hub"] is False
+    assert prefs2["spaces_mode"] == "custom"
     assert prefs2["enabled_spaces"] == [1, 2, 3]  # 非法项被滤掉
     assert prefs2["memory_enabled"] is False and prefs2["auto_inject"] is True
+
+    # 「只留知识中心」可达：custom + 空列表（旧模型做不到的表达）
+    assert (await cp.set_chat_prefs(USER_ID, {
+        "include_hub": True, "spaces_mode": "custom", "enabled_spaces": [],
+    }))["ok"]
+    only_hub = await cp.get_chat_prefs(USER_ID)
+    assert only_hub["spaces_mode"] == "custom" and only_hub["enabled_spaces"] == []
+    assert cp._is_enabled(only_hub) is True and cp._space_filter(only_hub) == []
 
     async with env() as db:
         rows = list((await db.execute(
@@ -83,16 +92,42 @@ async def test_chat_prefs_defaults_and_set(env):
     assert (await cp.set_chat_prefs(USER_ID, {"enabled_spaces": [1, 2, 3]})).get("ok")
 
 
+@pytest.mark.asyncio
+async def test_spaces_mode_legacy_migration(env):
+    """旧数据（无 mode 键）迁移推断：列表空→all；非空→custom。"""
+    async with env() as db:
+        db.add(KbSetting(user_id=21, key="chat_enabled_spaces", value="[]"))  # 旧默认
+        db.add(KbSetting(user_id=22, key="chat_enabled_spaces", value="[7]"))  # 旧勾选
+        await db.commit()
+    p21 = await cp.get_chat_prefs(21)
+    assert p21["spaces_mode"] == "all" and p21["enabled_spaces"] == []
+    p22 = await cp.get_chat_prefs(22)
+    assert p22["spaces_mode"] == "custom" and p22["enabled_spaces"] == [7]
+    # 保存后 mode 键落库固化
+    await cp.set_chat_prefs(21, {"spaces_mode": "custom", "enabled_spaces": []})
+    p21b = await cp.get_chat_prefs(21)
+    assert p21b["spaces_mode"] == "custom"
+
+
 def test_is_enabled_and_space_filter():
-    # hub 开 → 启用
-    assert cp._is_enabled({"include_hub": True, "enabled_spaces": []}) is True
-    # 选了空间 → 启用（hub 关）
-    assert cp._is_enabled({"include_hub": False, "enabled_spaces": [5]}) is True
-    # 全关 → 未启用
-    assert cp._is_enabled({"include_hub": False, "enabled_spaces": []}) is False
-    # 空间过滤：未显式选 = None（全部自己的空间）；显式选了 = 该列表
-    assert cp._space_filter({"include_hub": True, "enabled_spaces": []}) is None
-    assert cp._space_filter({"include_hub": True, "enabled_spaces": [1, 2]}) == [1, 2]
+    """周期三三态模式矩阵：mode(all/custom) × hub × 勾选列表。"""
+
+    def mk(hub, mode, spaces):
+        return {"include_hub": hub, "spaces_mode": mode, "enabled_spaces": spaces}
+
+    # hub 开 → 启用（无论模式与列表）
+    assert cp._is_enabled(mk(True, "all", [])) is True
+    assert cp._is_enabled(mk(True, "custom", [])) is True   # 只留知识中心（个人空间不参与）
+    # mode=all → 个人空间全参与，即使 hub 关
+    assert cp._is_enabled(mk(False, "all", [])) is True
+    # mode=custom：勾了才启用
+    assert cp._is_enabled(mk(False, "custom", [5])) is True
+    assert cp._is_enabled(mk(False, "custom", [])) is False  # 全关 → 未启用
+
+    # 空间过滤：all → None（不过滤=全部）；custom → 勾选列表（可空=不参与）
+    assert cp._space_filter(mk(True, "all", [])) is None
+    assert cp._space_filter(mk(True, "custom", [])) == []      # 只留知识中心的表达
+    assert cp._space_filter(mk(True, "custom", [1, 2])) == [1, 2]
 
 
 # ---------------------------------------------------------------- 自动注入
@@ -122,9 +157,16 @@ async def test_injection_off_and_disabled(env):
     await _seed_recall_data(env)
     # 默认（auto_inject=False）→ 无注入
     assert await cp.build_context_injection(USER_ID, "Vue3 组合式") is None
-    # 未启用（hub 关 + 空列表）→ 即使 auto_inject 也无注入
-    await cp.set_chat_prefs(USER_ID, {"include_hub": False, "enabled_spaces": [], "auto_inject": True})
+    # 未启用（hub 关 + custom 模式未选空间）→ 即使 auto_inject 也无注入
+    await cp.set_chat_prefs(USER_ID, {
+        "include_hub": False, "spaces_mode": "custom", "enabled_spaces": [], "auto_inject": True,
+    })
     assert await cp.build_context_injection(USER_ID, "Vue3") is None
+    # 但「只留知识中心」（hub 开 + custom 空列表）→ hub 词条可注入
+    await cp.set_chat_prefs(USER_ID, {"include_hub": True})
+    text = await cp.build_context_injection(USER_ID, "FastAPI 指南")
+    assert text is not None and "FastAPI" in text
+    assert "Vue3 组合式 API 的知识" not in text  # 个人空间未启用，私库词条不进注入
 
 
 @pytest.mark.asyncio
@@ -154,10 +196,11 @@ async def test_injection_memory_disabled(env):
 
 @pytest.mark.asyncio
 async def test_injection_hub_excluded(env):
-    """include_hub=False + 显式选个人空间 → 词条分节只有个人库内容，hub 词条不进注入。"""
+    """hub 关 + custom 勾选个人空间 → 词条分节只有个人库内容，hub 词条不进注入。"""
     space_id = await _seed_recall_data(env)
     await cp.set_chat_prefs(USER_ID, {
-        "include_hub": False, "enabled_spaces": [space_id], "auto_inject": True,
+        "include_hub": False, "spaces_mode": "custom",
+        "enabled_spaces": [space_id], "auto_inject": True,
     })
     text = await cp.build_context_injection(USER_ID, "FastAPI 指南")
     assert text is not None

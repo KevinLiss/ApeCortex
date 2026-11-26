@@ -31,7 +31,7 @@ async def _kb_query(query: str = "", limit: int = 5, user: User | None = None) -
     """检索用户记忆与知识库词条（背景信息一次拿全）。
 
     检索范围遵循用户在聊天页「知识库」弹窗里的启用配置：
-    知识中心公共库 + 用户启用的个人空间词条（未显式选空间=全部个人空间）。
+    知识中心（唯一公共库）+ 个人空间（全部或勾选的子集）。
 
     Args:
         query: 检索关键词（为空则返回高置信度摘要）
@@ -50,7 +50,7 @@ async def _kb_query(query: str = "", limit: int = 5, user: User | None = None) -
     prefs = await get_chat_prefs(user.id)
     if not _is_enabled(prefs):
         return json.dumps({
-            "ok": True, "memories": [], "private_pages": [], "hub_pages": [],
+            "ok": True, "memories": [], "personal_pages": [], "hub_pages": [],
             "profile_excerpt": "", "msg": "用户未启用知识库（聊天页知识库配置可开启）",
         }, ensure_ascii=False)
 
@@ -59,8 +59,15 @@ async def _kb_query(query: str = "", limit: int = 5, user: User | None = None) -
         space_ids=_space_filter(prefs),
         include_hub=prefs["include_hub"],
     )
-    result["profile_excerpt"] = (result.get("profile_excerpt") or "")[:400]
-    return json.dumps({"ok": True, **result}, ensure_ascii=False)
+    # 只输出周期三语义字段（personal=个人空间 / hub=知识中心），
+    # 剔除内部兼容键（shared_pages/public_pages 等）避免 AI 措辞退回旧概念。
+    return json.dumps({
+        "ok": True,
+        "memories": result.get("memories") or [],
+        "profile_excerpt": (result.get("profile_excerpt") or "")[:400],
+        "personal_pages": result.get("private_pages") or [],
+        "hub_pages": result.get("hub_pages") or [],
+    }, ensure_ascii=False)
 
 
 async def _kb_ingest(
@@ -122,7 +129,7 @@ def register_knowledge_base_mcp_tools() -> None:
     )
     mcp_manager.register_tool(
         name="kb_query",
-        description="检索当前用户的记忆/画像、私有知识库词条与公开知识库词条（三类背景信息一次拿全，回复前先调用）",
+        description="检索当前用户的记忆/画像、个人空间词条与知识中心（公共库）词条，回复前先调用",
         handler=_kb_query,
         plugin_name="knowledge_base",
     )

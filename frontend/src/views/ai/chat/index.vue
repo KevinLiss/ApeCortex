@@ -256,7 +256,7 @@
                   <div class="kb-prefs-row">
                     <div>
                       <div class="kb-prefs-label">我的知识空间</div>
-                      <div class="kb-prefs-tip">{{ kbPrefs.enabled_spaces.length ? `已启用 ${kbPrefs.enabled_spaces.length} 个` : '全部个人空间' }}</div>
+                      <div class="kb-prefs-tip">{{ spacesTip }}</div>
                     </div>
                     <el-switch :model-value="kbSpacesAll" size="small" @change="onAllSpacesChange" />
                   </div>
@@ -406,18 +406,30 @@ interface ChatSessionItem {
 const store = useAiChatStore()
 const router = useRouter()
 
-// 知识库偏好（ApeCortex）：启用集合模型（周期三）
+// 知识库偏好（ApeCortex）：启用集合模型 + 空间模式三态（周期三）
 const kbPrefsVisible = ref(false)
 const kbPrefs = ref<any>({
   include_hub: true,
+  spaces_mode: 'all' as 'all' | 'custom',
   enabled_spaces: [] as number[],
   memory_enabled: true,
   auto_inject: false,
 })
 const kbSpaces = ref<any[]>([])
 
-const kbOn = computed(() => kbPrefs.value.include_hub || kbPrefs.value.enabled_spaces.length > 0)
-const kbSpacesAll = computed(() => !kbPrefs.value.enabled_spaces.length)
+// 启用判定：hub 开 / 全部个人空间模式 / 勾选了空间，任一即启用
+const kbOn = computed(() =>
+  kbPrefs.value.include_hub
+  || kbPrefs.value.spaces_mode === 'all'
+  || kbPrefs.value.enabled_spaces.length > 0,
+)
+// 「我的知识空间」开关 = 模式切换：开=全部参与；关=按勾选（可全不选=仅知识中心）
+const kbSpacesAll = computed(() => kbPrefs.value.spaces_mode !== 'custom')
+const spacesTip = computed(() => {
+  const n = kbPrefs.value.enabled_spaces.length
+  if (kbPrefs.value.spaces_mode === 'all') return `启用全部 ${kbSpaces.value.length || '…'} 个个人空间`
+  return n ? `已启用 ${n} 个` : '未启用空间（仅知识中心参与）'
+})
 
 async function loadKbPrefs() {
   try {
@@ -431,9 +443,8 @@ async function loadKbPrefs() {
 }
 
 function onAllSpacesChange(val: boolean) {
-  // 开=全部个人空间（空列表语义）；关=进入勾选模式（先全选，用户再取消部分）
-  // 在勾选模式里取消所有勾选会回到空列表=全部语义，开关自动弹回「开」——自洽
-  kbPrefs.value.enabled_spaces = val ? [] : kbSpaces.value.map((s: any) => s.id)
+  // 开=全部参与（保留勾选存储，切回勾选模式时恢复）；关=进入勾选模式（列表不动，允许全不选）
+  kbPrefs.value.spaces_mode = val ? 'all' : 'custom'
   saveKbPrefs()
 }
 
@@ -441,11 +452,12 @@ async function saveKbPrefs() {
   try {
     await putKbChatPrefs({
       include_hub: kbPrefs.value.include_hub,
+      spaces_mode: kbPrefs.value.spaces_mode,
       enabled_spaces: kbPrefs.value.enabled_spaces,
       memory_enabled: kbPrefs.value.memory_enabled,
       auto_inject: kbPrefs.value.auto_inject,
     })
-    ElMessage.success('知识库配置已保存')
+    ElMessage({ message: '知识库配置已保存', type: 'success', grouping: true })
   } catch { /* 拦截器已提示 */ }
 }
 
