@@ -44,12 +44,8 @@
               <span class="slug-badge">{{ selected.slug }}</span>
               <div class="header-spacer"></div>
               <el-button v-if="canEdit" size="small" @click="startEdit">{{ t('knowledge.pages.edit') }}</el-button>
-              <el-button v-if="canPublish && selected.status !== 'live'" size="small" type="success" plain
-                @click="handlePublish('live')">{{ t('knowledge.pages.publish') }}</el-button>
-              <el-button v-if="canPublish && selected.status === 'live'" size="small" type="warning" plain
-                @click="handlePublish('archived')">{{ t('knowledge.pages.unpublish') }}</el-button>
-              <el-button v-if="canPromote" size="small" type="primary" plain @click="promoteVisible = true">
-                {{ t('knowledge.pages.promote') }}
+              <el-button v-if="canPush" size="small" type="primary" plain @click="handlePushPage">
+                {{ t('knowledge.push.pushShort') }}
               </el-button>
             </div>
           </template>
@@ -59,8 +55,8 @@
           <!-- 溯源（晋升副本） -->
           <div v-if="selected.origin_page_id" class="origin-box">
             <el-icon><Link /></el-icon>
-            {{ t('knowledge.pages.fromPromotion') }} space#{{ selected.origin_space_id }}
-            · {{ t('knowledge.pages.promotedBy') }} user#{{ selected.origin_author_id }}
+            {{ t('knowledge.pages.fromPush') }} space#{{ selected.origin_space_id }}
+            · {{ t('knowledge.pages.pushedBy') }} user#{{ selected.origin_author_id }}
           </div>
 
           <!-- 来源引用 -->
@@ -99,31 +95,6 @@
       </template>
     </el-dialog>
 
-    <!-- 晋升弹窗 -->
-    <el-dialog v-model="promoteVisible" :title="t('knowledge.pages.promoteTitle')" width="460px">
-      <el-form label-position="top" v-if="selected">
-        <el-form-item :label="t('knowledge.pages.promoteTarget')">
-          <el-select v-model="promoteTarget" style="width: 100%" :placeholder="t('knowledge.pages.promoteTargetPlaceholder')">
-            <el-option v-for="s in publicSpaces" :key="s.id" :value="s.id" :label="s.name" />
-          </el-select>
-          <el-alert
-            v-if="!publicSpaces.length"
-            type="warning"
-            :closable="false"
-            show-icon
-            class="promote-empty-alert"
-            :title="t('knowledge.pages.promoteNoTarget')"
-          />
-        </el-form-item>
-        <el-form-item :label="t('knowledge.pages.promoteNote')">
-          <el-input v-model="promoteNote" type="textarea" :rows="3" maxlength="500" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="promoteVisible = false">{{ t('common.action.cancel') }}</el-button>
-        <el-button type="primary" :disabled="!promoteTarget" @click="handlePromote">{{ t('knowledge.pages.promoteSubmit') }}</el-button>
-      </template>
-    </el-dialog>
   </div>
 </template>
 
@@ -135,9 +106,9 @@ import { Link } from '@element-plus/icons-vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 
-import { getKbPage, getKbPageRevisions, getKbPages, getKbSpaces, publishKbPage, submitKbPromotion, updateKbPage } from '@/api'
+import { getKbPage, getKbPageRevisions, getKbPages, submitKbPagePublic, updateKbPage } from '@/api'
 
-const props = defineProps<{ spaceId: number; canEdit: boolean; canPublish: boolean; canPromote: boolean }>()
+const props = defineProps<{ spaceId: number; canEdit: boolean; canPublish: boolean; canPush: boolean }>()
 const emit = defineEmits<{ (e: 'refresh'): void }>()
 
 const { t } = useI18n()
@@ -154,10 +125,7 @@ const revisions = ref<any[]>([])
 const editVisible = ref(false)
 const editBody = ref('')
 const saving = ref(false)
-const promoteVisible = ref(false)
-const promoteTarget = ref<number | null>(null)
-const promoteNote = ref('')
-const publicSpaces = ref<any[]>([])
+
 
 const statusTabs = computed(() => [
   { key: 'all', label: t('knowledge.pages.statusAll') },
@@ -187,10 +155,7 @@ function statusLabel(s: string): string {
   return map[s] ?? s
 }
 
-async function fetchSpaces() {
-  const res: any = await getKbSpaces()
-  publicSpaces.value = (res?.items ?? []).filter((s: any) => s.visibility === 'public')
-}
+
 
 async function fetchPages() {
   if (!props.spaceId) return
@@ -249,47 +214,6 @@ async function handleSave() {
   }
 }
 
-async function handlePublish(target: string) {
-  if (!selected.value) return
-  try {
-    await ElMessageBox.confirm(
-      target === 'live' ? t('knowledge.pages.publishConfirm') : t('knowledge.pages.unpublishConfirm'),
-      '', { type: 'warning' }
-    )
-  } catch { return }
-  try {
-    await publishKbPage(selected.value.id, target)
-    ElMessage.success(t('knowledge.pages.published'))
-    await selectPage(selected.value)
-    fetchPages()
-    emit('refresh')
-  } catch (e: any) {
-    /* 错误提示由 request 拦截器统一展示（含可读化文案） */
-  }
-}
-
-async function handlePromote() {
-  if (!selected.value || !promoteTarget.value) return
-  if (selected.value.source_count < 3 || selected.value.confidence < 0.8) {
-    ElMessage.warning(t('knowledge.pages.promoteGateFailDetail', {
-      sources: selected.value.source_count ?? 0,
-      confidence: Math.round((selected.value.confidence ?? 0) * 100),
-    }))
-    return
-  }
-  try {
-    await submitKbPromotion({
-      page_id: selected.value.id,
-      target_space_id: promoteTarget.value,
-      submit_note: promoteNote.value,
-    })
-    ElMessage.success(t('knowledge.pages.promoteSubmitted'))
-    promoteVisible.value = false
-  } catch (e: any) {
-    /* 错误提示由 request 拦截器统一展示（含可读化文案） */
-  }
-}
-
 function gotoPage(pageId: number) {
   const p = pages.value.find((x: any) => x.id === pageId)
   if (p) selectPage(p)
@@ -297,17 +221,20 @@ function gotoPage(pageId: number) {
 
 defineExpose({ refresh: fetchPages, gotoPage })
 
+async function handlePushPage() {
+  if (!selected.value) return
+  try {
+    await submitKbPagePublic(props.spaceId, selected.value.id)
+    ElMessage.success(t('knowledge.push.submitted'))
+  } catch { /* 拦截器已提示（幂等/在途文案） */ }
+}
+
 onMounted(() => {
-  fetchSpaces()
   fetchPages()
 })
 </script>
 
 <style scoped>
-.promote-empty-alert {
-  width: 100%;
-  margin-top: 8px;
-}
 
 .type-filter {
   display: flex;

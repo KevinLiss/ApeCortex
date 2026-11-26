@@ -28,10 +28,10 @@ async def _kb_save(content: str, mem_type: str = "fact", user: User | None = Non
 
 
 async def _kb_query(query: str = "", limit: int = 5, user: User | None = None) -> str:
-    """检索当前用户的记忆、私有/共享/公开知识库词条（背景信息一次拿全）。
+    """检索用户记忆与知识库词条（背景信息一次拿全）。
 
-    回复用户问题前先调用本工具，可获得：用户个人记忆/画像、
-    私有 Wiki 词条、成员共享 Wiki 词条、公开 Wiki 词条（均带 relevance 与来源标注）。
+    检索范围遵循用户在聊天页「知识库」弹窗里的启用配置：
+    知识中心公共库 + 用户启用的个人空间词条（未显式选空间=全部个人空间）。
 
     Args:
         query: 检索关键词（为空则返回高置信度摘要）
@@ -40,9 +40,25 @@ async def _kb_query(query: str = "", limit: int = 5, user: User | None = None) -
     """
     if user is None:
         return json.dumps({"ok": False, "msg": "缺少用户上下文，无法查询"}, ensure_ascii=False)
+    from src.plugins.builtin.knowledge_base.pipeline.chat_prefs import (
+        _is_enabled,
+        _space_filter,
+        get_chat_prefs,
+    )
     from src.plugins.builtin.knowledge_base.pipeline.retrieval import search_all
 
-    result = await search_all(user.id, query, limit)
+    prefs = await get_chat_prefs(user.id)
+    if not _is_enabled(prefs):
+        return json.dumps({
+            "ok": True, "memories": [], "private_pages": [], "hub_pages": [],
+            "profile_excerpt": "", "msg": "用户未启用知识库（聊天页知识库配置可开启）",
+        }, ensure_ascii=False)
+
+    result = await search_all(
+        user.id, query, limit,
+        space_ids=_space_filter(prefs),
+        include_hub=prefs["include_hub"],
+    )
     result["profile_excerpt"] = (result.get("profile_excerpt") or "")[:400]
     return json.dumps({"ok": True, **result}, ensure_ascii=False)
 
@@ -221,7 +237,10 @@ async def _kb_collect_arxiv(query: str, max_results: int = 5, user: User | None 
     """
     from src.plugins.builtin.knowledge_base.collector.academic import search_arxiv
     results = await search_arxiv(query, max_results)
-    return json.dumps({"ok": not results or "error" not in results[0], "results": results[:max_results]}, ensure_ascii=False)
+    return json.dumps(
+        {"ok": not results or "error" not in results[0], "results": results[:max_results]},
+        ensure_ascii=False,
+    )
 
 
 async def _kb_collect_openalex(query: str, max_results: int = 5, user: User | None = None) -> str:
@@ -234,7 +253,10 @@ async def _kb_collect_openalex(query: str, max_results: int = 5, user: User | No
     """
     from src.plugins.builtin.knowledge_base.collector.academic import search_openalex
     results = await search_openalex(query, max_results)
-    return json.dumps({"ok": not results or "error" not in results[0], "results": results[:max_results]}, ensure_ascii=False)
+    return json.dumps(
+        {"ok": not results or "error" not in results[0], "results": results[:max_results]},
+        ensure_ascii=False,
+    )
 
 
 async def _kb_research(topic: str, space_id: int = 0, user: User | None = None) -> str:
@@ -257,4 +279,7 @@ async def _kb_research(topic: str, space_id: int = 0, user: User | None = None) 
         )
     except RuntimeError as exc:  # 成本护栏：当日任务超限
         return json.dumps({"ok": False, "msg": str(exc)}, ensure_ascii=False)
-    return json.dumps({"ok": True, "job_id": job_id, "msg": "调研任务已入队，完成后在任务中心/词条页查看草稿"}, ensure_ascii=False)
+    return json.dumps(
+        {"ok": True, "job_id": job_id, "msg": "调研任务已入队，完成后在任务中心/词条页查看草稿"},
+        ensure_ascii=False,
+    )

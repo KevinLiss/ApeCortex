@@ -3,8 +3,6 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.plugins.builtin.knowledge_base.models import MEMORY_TYPES
-
 
 class MemoryOut(BaseModel):
     """记忆条目响应。"""

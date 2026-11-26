@@ -12,7 +12,6 @@ Covers the gaps found when auditing "版本更新" end-to-end:
 """
 
 import io
-import os
 import tarfile
 import zipfile
 from pathlib import Path
@@ -25,7 +24,6 @@ from src.api import system as system_module
 from src.api.system import router as system_router
 from src.core.config import settings
 from src.models import User
-
 
 # ---------------------------------------------------------------- helpers
 

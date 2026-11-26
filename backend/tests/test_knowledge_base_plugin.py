@@ -270,11 +270,10 @@ async def test_mcp_reserved_user_param_not_in_schema_but_injected():
 # P1：Wiki 编译 + 晋升流 + 双通道检索
 # =================================================================
 
-import pytest_asyncio  # noqa: F401
+import pytest_asyncio  # noqa: F401, E402
 
 from src.plugins.builtin.knowledge_base.models import (  # noqa: E402
     KbDocSource,
-    KbPromotion,
     KbSpace,
     KbWikiPage,
     KbWikiRevision,
@@ -284,7 +283,6 @@ from src.plugins.builtin.knowledge_base.models import (  # noqa: E402
 @pytest.fixture
 async def wiki_env(monkeypatch, tmp_path):
     """全套表（含 wiki 六表）+ 管线 SessionLocal 替换。"""
-    import src.db as db_mod
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path}/kb_wiki_test.db")
     factory = async_sessionmaker(engine, expire_on_commit=False)
     async with engine.begin() as conn:
@@ -292,14 +290,25 @@ async def wiki_env(monkeypatch, tmp_path):
         await conn.run_sync(PluginBase.metadata.create_all)
 
     import src.plugins.builtin.knowledge_base.pipeline.compiler as compiler_mod
+    import src.plugins.builtin.knowledge_base.pipeline.hub as hub_mod
     import src.plugins.builtin.knowledge_base.pipeline.ingest_api as ingest_mod
-    import src.plugins.builtin.knowledge_base.pipeline.retrieval as retrieval_mod
     import src.plugins.builtin.knowledge_base.pipeline.jobs as jobs_mod
+    import src.plugins.builtin.knowledge_base.pipeline.retrieval as retrieval_mod
+    import src.plugins.builtin.knowledge_base.pipeline.submission as submission_mod
     monkeypatch.setattr(compiler_mod, "SessionLocal", factory)
     monkeypatch.setattr(ingest_mod, "SessionLocal", factory)
     monkeypatch.setattr(retrieval_mod, "SessionLocal", factory)
     monkeypatch.setattr(jobs_mod, "SessionLocal", factory)
     monkeypatch.setattr(memory_pipeline, "SessionLocal", factory)
+    monkeypatch.setattr(submission_mod, "SessionLocal", factory)
+    monkeypatch.setattr(hub_mod, "SessionLocal", factory)
+
+    # 禁后台 worker（ingest/compile 测试手动驱动 job 断言，防 worker 并发抢跑）
+    async def _no_worker(user_id: int) -> None:
+        return None
+
+    monkeypatch.setattr(jobs_mod, "_ensure_worker", _no_worker)
+    hub_mod.reset_hub_cache()  # 避免上一个测试缓存的 hub id 串到本库
 
     # mock compiler 的 LLM（import 自 memory 模块）
     async def fake_llm(system, user, max_tokens, temperature):
@@ -307,12 +316,31 @@ async def wiki_env(monkeypatch, tmp_path):
     monkeypatch.setattr(compiler_mod, "_call_llm_json", fake_llm)
     compiler_mod._MOCK_RESPONSE = ""
     yield factory
+    hub_mod.reset_hub_cache()  # 缓存指向本库，退出前清掉防泄漏到下一测试
     await engine.dispose()
 
 
 def _mk_pages_json(pages: list[dict]) -> str:
     import json as _json
     return _json.dumps({"pages": pages}, ensure_ascii=False)
+
+
+def test_parse_pages_truncation_repair():
+    """max_tokens 截断的 Map 输出：丢弃不完整 page 后仍能解析出部分词条。"""
+    from src.plugins.builtin.knowledge_base.pipeline import compiler as c
+
+    full = _mk_pages_json([
+        {"slug": "a", "title": "词条A", "body_md": "正文A" * 10, "source_chunk": ""},
+        {"slug": "b", "title": "词条B", "body_md": "正文B" * 10, "source_chunk": ""},
+    ])
+    # 模拟截断：砍掉最后一个对象的尾部
+    truncated = full[: full.rfind('{"slug"') - 2] + '，"body_md": "被截断的部分'
+    pages = c._parse_pages(truncated)
+    assert [p["slug"] for p in pages] == ["a"]
+
+    # 第一个 page 就被截断 → 空列表（整单作废但不抛异常）
+    first_cut = '{"pages": [{"slug": "x", "title": "t", "body_md": "被截'
+    assert c._parse_pages(first_cut) == []
 
 
 # ---------------------------------------------------------------- 编译
@@ -326,7 +354,6 @@ async def test_compile_creates_pages_with_refs(wiki_env):
         db.add(KbSpace(owner_user_id=user2, name="公开库", visibility="public"))
         await db.commit()
         space_private = (await db.execute(select(KbSpace).where(KbSpace.owner_user_id == user1))).scalars().one()
-        space_public = (await db.execute(select(KbSpace).where(KbSpace.visibility == "public"))).scalars().one()
 
         # 两篇来源资料：ApeAdmin 技术栈 + 插件体系
         db.add(KbDocSource(space_id=space_private.id, title="技术栈文档",
@@ -336,12 +363,14 @@ async def test_compile_creates_pages_with_refs(wiki_env):
             content="ApeAdmin 插件通过 PluginInterface 接入，支持 MCP 工具注册与菜单 seed。",
             content_hash="h2", source_type="upload"))
         await db.commit()
-        doc1 = (await db.execute(select(KbDocSource).where(KbDocSource.title == "技术栈文档"))).scalars().one()
 
     # Mock Map 输出两个词条
     c._MOCK_RESPONSE = _mk_pages_json([
         {"slug": "apeadmin-tech-stack", "title": "ApeAdmin 技术栈",
-         "body_md": "ApeAdmin 技术栈：FastAPI 与 Vue3 构建的后台管理框架 [1]。核心依赖 SQLAlchemy 2.0 与 Element Plus。",
+         "body_md": (
+            "ApeAdmin 技术栈：FastAPI 与 Vue3 构建的后台管理框架 [1]。"
+            "核心依赖 SQLAlchemy 2.0 与 Element Plus。"
+        ),
          "source_chunk": "FastAPI 和 Vue3 构建"},
         {"slug": "apeadmin-plugin", "title": "ApeAdmin 插件体系",
          "body_md": "插件通过 PluginInterface 接入 [1]。支持 MCP 工具注册与菜单 seed。",
@@ -406,165 +435,65 @@ async def test_compile_merge_shrink_protection(wiki_env):
         assert pages, "词条仍在（保护生效不丢数据）"
 
 
-# ---------------------------------------------------------------- 晋升流
-
-async def test_promotion_full_flow(wiki_env):
-    from src.plugins.builtin.knowledge_base.pipeline import compiler as c
-
-    async with wiki_env() as db:
-        db.add(KbSpace(owner_user_id=1, name="私有", visibility="private"))
-        db.add(KbSpace(owner_user_id=2, name="公开库", visibility="public"))
-        await db.commit()
-        spaces = list((await db.execute(select(KbSpace))).scalars().all())
-        private = next(s for s in spaces if s.visibility == "private")
-        public = next(s for s in spaces if s.visibility == "public")
-
-        # 达到晋升门槛的词条
-        db.add(KbWikiPage(
-            space_id=private.id, slug="kb-test", title="测试词条",
-            body_md="测试正文" * 10, status="draft",
-            confidence=0.9, source_count=3, version=1))
-        await db.commit()
-        page = (await db.execute(select(KbWikiPage))).scalars().one()
-
-    # 1. 提交晋升（owner）
-    r = await c.submit_promotion(page.id, user_id=1, target_space_id=public.id, submit_note="推送")
-    assert r["ok"], r
-    promo_id = r["promotion_id"]
-
-    # 2. 审核批准
-    r2 = await c.review_promotion(promo_id, reviewer_id=2, approve=True, comment="通过")
-    assert r2["ok"] and r2["status"] == "approved", r2
-    published_id = r2["published_page_id"]
-
-    async with wiki_env() as db:
-        published = await db.get(KbWikiPage, published_id)
-        assert published.space_id == public.id
-        assert published.status == "draft"  # PandaWiki 三态：先 draft，维护者再发布
-        assert published.origin_space_id == private.id  # 溯源三连
-        assert published.origin_page_id == page.id
-        assert published.origin_author_id == 1
-        assert published.last_edit_source == "user"
-
-        # 3. 维护者发布
-        r3 = await c.publish_page(published_id, user_id=2, status="live")
-        assert r3["ok"]
-
-        # 4. 私库原件未动（双轨）
-        orig = await db.get(KbWikiPage, page.id)
-        assert orig.status == "draft" and orig.space_id == private.id
-
-        # 5. 非维护者不能发布公开库词条
-        r4 = await c.publish_page(published_id, user_id=1, status="archived")
-        assert not r4["ok"]
-
-
-async def test_promotion_gates(wiki_env):
-    from src.plugins.builtin.knowledge_base.pipeline import compiler as c
-
-    async with wiki_env() as db:
-        db.add(KbSpace(owner_user_id=1, name="私有", visibility="private"))
-        db.add(KbSpace(owner_user_id=2, name="公开", visibility="public"))
-        await db.commit()
-        spaces = list((await db.execute(select(KbSpace))).scalars().all())
-        private = next(s for s in spaces if s.visibility == "private")
-        public = next(s for s in spaces if s.visibility == "public")
-        db.add(KbWikiPage(space_id=private.id, slug="weak", title="低门槛词条",
-            body_md="内容" * 20, status="draft", confidence=0.5, source_count=1))
-        await db.commit()
-        weak = (await db.execute(select(KbWikiPage))).scalars().one()
-
-    # 门槛不足：来源数 1 < 3，置信度 0.5 < 0.8
-    r = await c.submit_promotion(weak.id, user_id=1, target_space_id=public.id)
-    assert not r["ok"] and "来源数不足" in r["msg"]
-
-    # 非 owner 提交
-    r2 = await c.submit_promotion(weak.id, user_id=9, target_space_id=public.id)
-    assert not r2["ok"]
-
-
-async def test_promotion_snapshot_frozen(wiki_env):
-    """审核期间私库继续编辑 → 待审快照不变。"""
-    from src.plugins.builtin.knowledge_base.pipeline import compiler as c
-
-    async with wiki_env() as db:
-        db.add(KbSpace(owner_user_id=1, name="私有", visibility="private"))
-        db.add(KbSpace(owner_user_id=2, name="公开", visibility="public"))
-        await db.commit()
-        spaces = list((await db.execute(select(KbSpace))).scalars().all())
-        private = next(s for s in spaces if s.visibility == "private")
-        public = next(s for s in spaces if s.visibility == "public")
-        db.add(KbWikiPage(space_id=private.id, slug="freeze", title="冻结测试",
-            body_md="原始快照内容", status="draft", confidence=0.9, source_count=3))
-        await db.commit()
-        page = (await db.execute(select(KbWikiPage))).scalars().one()
-
-    r = await c.submit_promotion(page.id, 1, public.id)
-    assert r["ok"]
-    promo_id = r["promotion_id"]
-
-    # 私库继续编辑
-    async with wiki_env() as db:
-        p = await db.get(KbWikiPage, page.id)
-        p.body_md = "被改过的内容" + "x" * 100
-        await db.commit()
-
-    # 审核看到的是冻结快照
-    async with wiki_env() as db:
-        promo = await db.get(KbPromotion, promo_id)
-        assert promo.snapshot_md == "原始快照内容"
-
-    r2 = await c.review_promotion(promo_id, reviewer_id=2, approve=True)
-    assert r2["ok"]
-    async with wiki_env() as db:
-        pub = await db.get(KbWikiPage, r2["published_page_id"])
-        assert pub.body_md == "原始快照内容"  # 发布的是快照，非最新私库内容
-
-
 # ---------------------------------------------------------------- 双通道检索（防泄漏核心）
 
 async def test_retrieval_dual_channel_no_leak(wiki_env):
+    """周期三：个人空间 owner 硬过滤 + hub 单例 live-only。"""
+    from src.plugins.builtin.knowledge_base.pipeline import hub as hub_mod
     from src.plugins.builtin.knowledge_base.pipeline import retrieval as r
 
-    async with wiki_env() as db:
-        # user1 私有库词条 + 公开库词条
-        db.add(KbSpace(owner_user_id=1, name="u1私有", visibility="private"))
-        db.add(KbSpace(owner_user_id=1, name="公开", visibility="public"))
-        await db.commit()
-        spaces = list((await db.execute(select(KbSpace))).scalars().all())
-        private = next(s for s in spaces if s.visibility == "private")
-        public = next(s for s in spaces if s.visibility == "public")
+    # 知识中心（hub：owner=0 系统所有，首次调用自动创建）
+    hub_id = await hub_mod.get_hub_space_id()
 
-        db.add(KbWikiPage(space_id=private.id, slug="vue3-stack", title="Vue3 技术栈私库版",
+    async with wiki_env() as db:
+        priv = KbSpace(owner_user_id=1, name="u1 私库", visibility="private")
+        db.add(priv)
+        await db.flush()
+        # user1 私库词条
+        db.add(KbWikiPage(space_id=priv.id, slug="vue3-stack", title="Vue3 技术栈私库版",
             body_md="Vue3 私有笔记：组合式 API 与 Element Plus 用法", status="live",
             confidence=0.9, source_count=3))
-        # 公开库：live 可见 + draft 不可见 + candidate 不可见
-        db.add(KbWikiPage(space_id=public.id, slug="fastapi-guide", title="FastAPI 公开指南",
-            body_md="FastAPI 公开教程：路由与依赖注入", status="live",
+        # hub：live 可见 + draft/candidate 不可见
+        db.add(KbWikiPage(space_id=hub_id, slug="fastapi-guide", title="FastAPI 公开指南",
+            body_md="FastAPI 教程：路由与依赖注入", status="live",
             confidence=0.9, source_count=3))
-        db.add(KbWikiPage(space_id=public.id, slug="wip", title="未发布草稿",
+        db.add(KbWikiPage(space_id=hub_id, slug="wip", title="未发布草稿",
             body_md="草稿内容 FastAPI", status="draft", confidence=0.9, source_count=3))
-        db.add(KbWikiPage(space_id=public.id, slug="cand", title="候选词条",
+        db.add(KbWikiPage(space_id=hub_id, slug="cand", title="候选词条",
             body_md="候选内容 FastAPI", status="candidate", confidence=0.5, source_count=1))
         await db.commit()
+        priv_id = priv.id
 
     # user1：双通道都能拿到
     out1 = await r.search_all(1, "FastAPI")
-    assert any(p["slug"] == "fastapi-guide" for p in out1["public_pages"])
+    assert any(p["slug"] == "fastapi-guide" for p in out1["hub_pages"])
+    # 兼容键保持旧调用方不断
+    assert out1["public_pages"] == out1["hub_pages"]
+    assert out1["shared_pages"] == []
 
-    # user2（非 owner）：公开 live 可见，user1 私库不可见，公开 draft/candidate 不可见
+    # user2（非 owner）：hub live 可见、user1 私库不可见、hub draft/candidate 不外泄
     out2 = await r.search_all(2, "FastAPI")
-    assert any(p["slug"] == "fastapi-guide" for p in out2["public_pages"])
-    slugs_all = [p["slug"] for p in out2["public_pages"]]
+    assert any(p["slug"] == "fastapi-guide" for p in out2["hub_pages"])
+    slugs_all = [p["slug"] for p in out2["hub_pages"]]
     assert "wip" not in slugs_all and "cand" not in slugs_all
-    assert all(p["slug"] != "vue3-stack" for p in out2["public_pages"])
-    # 私库通道为空（user2 无自己的空间）
-    assert out2["private_pages"] == []
+    assert all(p["slug"] != "vue3-stack" for p in out2["hub_pages"])
+    assert out2["private_pages"] == []  # user2 无自己的空间
 
-    # 全量通道：user1 的私库词条可召回
+    # user1 私库词条可召回
     out3 = await r.search_all(1, "Vue3")
     assert any(p["slug"] == "vue3-stack" for p in out3["private_pages"])
 
+    # include_hub=False → hub 通道关闭
+    out4 = await r.search_all(2, "FastAPI", include_hub=False)
+    assert out4["hub_pages"] == []
+
+    # space_ids 过滤：未含目标空间的列表不命中
+    out5 = await r.search_all(1, "Vue3", space_ids=[priv_id + 999])
+    assert all(p["slug"] != "vue3-stack" for p in out5["private_pages"])
+
+    # hub 空间不属于任何用户（owner=0），不出现在个人私库通道
+    out6 = await r.search_all(1, "FastAPI")
+    assert all(p["slug"] != "fastapi-guide" for p in out6["private_pages"])
 
 # ---------------------------------------------------------------- 摄入
 
@@ -660,73 +589,44 @@ async def test_render_channel_graceful_degrade():
         assert not r["ok"] and "渲染引擎" in r["msg"]
 
 
-async def test_contributions_endpoint(wiki_env):
-    """贡献榜聚合：公开库 live 词条按原作者聚合。"""
-    from src.plugins.builtin.knowledge_base.models import KbSpace, KbWikiPage
-    async with wiki_env() as db:
-        db.add(KbSpace(owner_user_id=2, name="pub", visibility="public"))
-        await db.commit()
-        space = (await db.execute(select(KbSpace).where(KbSpace.visibility == "public"))).scalars().one()
-        db.add(KbWikiPage(space_id=space.id, slug="a", title="A", body_md="x" * 50,
-            status="live", origin_author_id=7, confidence=0.9, source_count=3))
-        db.add(KbWikiPage(space_id=space.id, slug="b", title="B", body_md="x" * 50,
-            status="live", origin_author_id=7, confidence=0.9, source_count=3))
-        db.add(KbWikiPage(space_id=space.id, slug="c", title="C", body_md="x" * 50,
-            status="draft", origin_author_id=7, confidence=0.9, source_count=3))  # draft 不计
-        await db.commit()
-
-    # 直接复用 SQL 逻辑验证（API 层同款语句）
-    from sqlalchemy import func
-    async with wiki_env() as db:
-        stmt = (
-            select(KbWikiPage.origin_author_id, func.count(KbWikiPage.id))
-            .join(KbSpace, KbWikiPage.space_id == KbSpace.id)
-            .where(KbSpace.visibility == "public", KbWikiPage.status == "live",
-                   KbWikiPage.origin_author_id.isnot(None))
-            .group_by(KbWikiPage.origin_author_id)
-        )
-        rows = (await db.execute(stmt)).all()
-    assert rows == [(7, 2)]  # draft 不计入
-
-
 # ---------------------------------------------------------------- M1: 相关性纪律
 async def test_retrieval_no_fallback_when_no_hit(wiki_env):
-    """零命中不返回兜底垃圾：问题词完全不在任何词条里 → 双通道均为空。"""
+    """零命中不返回兑底垃圾：问题词完全不在任何词条里 → 双通道均为空。"""
+    from src.plugins.builtin.knowledge_base.pipeline import hub as hub_mod
     from src.plugins.builtin.knowledge_base.pipeline import retrieval as r
 
+    hub_id = await hub_mod.get_hub_space_id()
+
     async with wiki_env() as db:
-        db.add(KbSpace(owner_user_id=1, name="私有", visibility="private"))
-        db.add(KbSpace(owner_user_id=1, name="公开", visibility="public"))
-        await db.commit()
-        spaces = list((await db.execute(select(KbSpace))).scalars().all())
-        private = next(s for s in spaces if s.visibility == "private")
-        public = next(s for s in spaces if s.visibility == "public")
-        db.add(KbWikiPage(space_id=private.id, slug="fe", title="前端技术栈",
+        priv = KbSpace(owner_user_id=1, name="私库", visibility="private")
+        db.add(priv)
+        await db.flush()
+        db.add(KbWikiPage(space_id=priv.id, slug="fe", title="前端技术栈",
             body_md="Vue3 与 Element Plus 的组合", status="live", confidence=0.9, source_count=3))
-        db.add(KbWikiPage(space_id=public.id, slug="pub-fe", title="前端技术栈（公开）",
+        db.add(KbWikiPage(space_id=hub_id, slug="pub-fe", title="前端技术栈（公开）",
             body_md="Vue3 与 Element Plus 的组合", status="live", confidence=0.9, source_count=3))
         await db.commit()
 
     out = await r.search_all(1, "量子纠缠退相干")
-    assert out["private_pages"] == [] and out["public_pages"] == []
+    assert out["private_pages"] == [] and out["hub_pages"] == []
 
 
 async def test_retrieval_low_relevance_flag(wiki_env):
     """部分命中仍返回，但标记 low_relevance 并给出 relevance 分数。"""
+    from src.plugins.builtin.knowledge_base.pipeline import hub as hub_mod
     from src.plugins.builtin.knowledge_base.pipeline import retrieval as r
 
+    hub_id = await hub_mod.get_hub_space_id()
+
     async with wiki_env() as db:
-        db.add(KbSpace(owner_user_id=1, name="公开", visibility="public"))
-        await db.commit()
-        space = (await db.execute(select(KbSpace))).scalars().first()
-        db.add(KbWikiPage(space_id=space.id, slug="rag", title="RAG 与长上下文",
+        db.add(KbWikiPage(space_id=hub_id, slug="rag", title="RAG 与长上下文",
             body_md="检索增强生成与长上下文窗口的取舍", status="live",
             confidence=0.9, source_count=3))
         await db.commit()
 
     out = await r.search_all(2, "RAG 向量数据库选型")
-    assert out["public_pages"], "部分命中应返回结果"
-    hit = out["public_pages"][0]
+    assert out["hub_pages"], "部分命中应返回结果"
+    hit = out["hub_pages"][0]
     assert hit["low_relevance"] is True and 0 < hit["relevance"] <= 1
 
 
@@ -755,38 +655,41 @@ async def test_save_explicit_rejects_noise(kb_env):
     assert r2["ok"] is True
 
 
-# ---------------------------------------------------------------- M3: 共享空间 ACL
-async def test_shared_space_member_acl(wiki_env):
-    """共享空间：成员可召回，非成员零召回；reader 不可写、writer 可写。"""
-    from src.plugins.builtin.knowledge_base.models import KbSpaceMember
+# ---------------------------------------------------------------- 周期三: 个人库仅 owner
+async def test_private_space_owner_only(wiki_env):
+    """空间无成员概念：owner 之外读写全拒、零召回。"""
     from src.plugins.builtin.knowledge_base.pipeline import ingest_api as ingest
     from src.plugins.builtin.knowledge_base.pipeline import retrieval as r
 
     async with wiki_env() as db:
-        db.add(KbSpace(owner_user_id=1, name="团队库", visibility="shared"))
-        await db.commit()
-        space = (await db.execute(select(KbSpace))).scalars().first()
-        db.add(KbWikiPage(space_id=space.id, slug="team-rule", title="团队规范",
-            body_md="团队规范：所有提交需经过双人评审", status="live",
-            confidence=0.9, source_count=3))
-        db.add(KbSpaceMember(space_id=space.id, user_id=2, role="reader"))
-        db.add(KbSpaceMember(space_id=space.id, user_id=3, role="writer"))
+        space = KbSpace(owner_user_id=1, name="个人库", visibility="private")
+        db.add(space)
+        await db.flush()
+        db.add(KbWikiPage(space_id=space.id, slug="my-note", title="我的笔记",
+            body_md="私有笔记内容 Vue3", status="live", confidence=0.9, source_count=3))
         await db.commit()
         space_id = space.id
 
-    assert await ingest.get_space_role(2, space_id) == "reader"
-    assert await ingest.get_space_role(3, space_id) == "writer"
-    assert await ingest.get_space_role(4, space_id) is None
+    # 角色只有 owner / None
+    assert await ingest.get_space_role(1, space_id) == "owner"
+    assert await ingest.get_space_role(2, space_id) is None
 
+    # 非 owner 读写全拒
+    ok, _ = await ingest.ensure_space_access(2, space_id, need_write=False)
+    assert ok is False
     ok, _ = await ingest.ensure_space_access(2, space_id, need_write=True)
     assert ok is False
-    ok, _ = await ingest.ensure_space_access(3, space_id, need_write=True)
+    # owner 读写全通
+    ok, _ = await ingest.ensure_space_access(1, space_id, need_write=True)
     assert ok is True
 
-    out2 = await r.search_all(2, "团队规范")
-    assert any(p["slug"] == "team-rule" for p in out2["shared_pages"])
-    out4 = await r.search_all(4, "团队规范")
-    assert out4["shared_pages"] == []  # 非成员无共享通道召回路径
+    # 检索防泄漏：user2 在私库通道拿不到 user1 的词条
+    out2 = await r.search_all(2, "私有笔记内容 Vue3")
+    assert all(p["slug"] != "my-note" for p in out2["private_pages"])
+    assert out2["private_pages"] == []
+    # owner 自己可召回
+    out1 = await r.search_all(1, "私有笔记内容")
+    assert any(p["slug"] == "my-note" for p in out1["private_pages"])
 
 
 # ---------------------------------------------------------------- M3: 公开库只读出口
@@ -805,30 +708,6 @@ def test_public_key_hash_stable():
     assert pub.hash_key("kbp_demo") == pub.hash_key("kbp_demo")
     assert pub.hash_key("kbp_demo") != pub.hash_key("kbp_demo2")
     assert len(pub.hash_key("x")) == 64
-
-
-# ---------------------------------------------------------------- M3: 自审开关
-async def test_self_review_blocked_by_default(wiki_env):
-    from src.plugins.builtin.knowledge_base.pipeline import compiler as c
-
-    async with wiki_env() as db:
-        db.add(KbSpace(owner_user_id=1, name="私库", visibility="private"))
-        db.add(KbSpace(owner_user_id=1, name="公开库", visibility="public"))
-        await db.commit()
-        spaces = list((await db.execute(select(KbSpace))).scalars().all())
-        private = next(s for s in spaces if s.visibility == "private")
-        public = next(s for s in spaces if s.visibility == "public")
-        db.add(KbWikiPage(space_id=private.id, slug="promo-me", title="可晋升词条",
-            body_md="内容足够长用于晋升快照" * 3, status="draft",
-            confidence=0.9, source_count=3))
-        await db.commit()
-        page = (await db.execute(select(KbWikiPage))).scalars().first()
-        page_id, public_id = page.id, public.id
-
-    sub = await c.submit_promotion(page_id, user_id=1, target_space_id=public_id, submit_note="自审测试")
-    assert sub["ok"] is True
-    res = await c.review_promotion(sub["promotion_id"], reviewer_id=1, approve=True)
-    assert res["ok"] is False and "自己" in res["msg"]
 
 
 # ---------------------------------------------------------------- M4: 检索加权与同义词
@@ -872,10 +751,12 @@ async def test_retrieval_synonym_expansion(wiki_env):
 async def test_memory_conflict_invalidates_old(kb_env, mock_llm):
     """同主体不同值：旧事实软失效，检索只剩新事实。"""
     mock_llm.response = json.dumps({"memories": [{"content": "用户的前端技术栈是 Vue3", "type": "fact"}]})
-    await memory_pipeline.extract_and_store(1, 1, transcript_override="用户: 我的前端技术栈是 Vue3，组件库用 Element Plus。")
+    await memory_pipeline.extract_and_store(
+        1, 1, transcript_override="用户: 我的前端技术栈是 Vue3，组件库用 Element Plus。")
 
     mock_llm.response = json.dumps({"memories": [{"content": "用户的前端技术栈是 React", "type": "fact"}]})
-    await memory_pipeline.extract_and_store(1, 2, transcript_override="用户: 我换成 React 了，前端技术栈是 React，状态管理用 zustand。")
+    await memory_pipeline.extract_and_store(
+        1, 2, transcript_override="用户: 我换成 React 了，前端技术栈是 React，状态管理用 zustand。")
 
     hits, _ = await memory_pipeline.search_memories(1, "")
     contents = [h["content"] for h in hits]
@@ -891,7 +772,8 @@ async def test_memory_conflict_invalidates_old(kb_env, mock_llm):
 async def test_memory_different_subject_not_invalidated(kb_env, mock_llm):
     """主体不同不触发失效。"""
     mock_llm.response = json.dumps({"memories": [{"content": "用户的前端技术栈是 Vue3", "type": "fact"}]})
-    await memory_pipeline.extract_and_store(1, 1, transcript_override="用户: 我的前端技术栈是 Vue3，组件库用 Element Plus。")
+    await memory_pipeline.extract_and_store(
+        1, 1, transcript_override="用户: 我的前端技术栈是 Vue3，组件库用 Element Plus。")
     mock_llm.response = json.dumps({"memories": [{"content": "用户的工作地点是北京", "type": "fact"}]})
     await memory_pipeline.extract_and_store(1, 2, transcript_override="用户: 我在北京工作，日常通勤单程大约一小时。")
 
@@ -899,22 +781,20 @@ async def test_memory_different_subject_not_invalidated(kb_env, mock_llm):
     assert len(hits) == 2
 
 
-# ---------------------------------------------------------------- M3 补丁：共享库发布权限
-async def test_shared_space_publish_requires_writer(wiki_env):
-    """reader 成员不能改状态；writer/owner 可以（此前 shared 不在任何分支 → 越权）。"""
-    from src.plugins.builtin.knowledge_base.models import KbSpaceMember
+# ---------------------------------------------------------------- 周期三: 词条状态流转仅 owner
+async def test_publish_page_requires_owner(wiki_env):
+    """词条状态流转（draft/live/archived）仅空间 owner 可操作。"""
     from src.plugins.builtin.knowledge_base.pipeline import compiler as c
 
     async with wiki_env() as db:
-        db.add(KbSpace(owner_user_id=1, name="团队库", visibility="shared"))
-        await db.commit()
-        space = (await db.execute(select(KbSpace))).scalars().first()
+        space = KbSpace(owner_user_id=1, name="个人库", visibility="private")
+        db.add(space)
+        await db.flush()
         db.add(KbWikiPage(space_id=space.id, slug="draft-1", title="草稿",
             body_md="内容" * 30, status="draft", confidence=0.9, source_count=3))
-        db.add(KbSpaceMember(space_id=space.id, user_id=2, role="reader"))
-        db.add(KbSpaceMember(space_id=space.id, user_id=3, role="writer"))
         await db.commit()
         page_id = (await db.execute(select(KbWikiPage))).scalars().first().id
 
-    assert (await c.publish_page(page_id, user_id=2, status="live"))["ok"] is False   # reader 被拒
-    assert (await c.publish_page(page_id, user_id=3, status="live"))["ok"] is True    # writer 通过
+    assert (await c.publish_page(page_id, user_id=1, status="live"))["ok"] is True   # owner
+    assert (await c.publish_page(page_id, user_id=2, status="live"))["ok"] is False  # 非 owner
+    assert (await c.publish_page(page_id, user_id=1, status="bogus"))["ok"] is False  # 非法状态

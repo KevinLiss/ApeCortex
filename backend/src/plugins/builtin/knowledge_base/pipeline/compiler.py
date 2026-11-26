@@ -14,10 +14,9 @@
 
 成本纪律：单篇文档编译恰好 2 次 LLM（Map 提取 1 + Reduce 合并仅存疑时 1）。
 """
-import asyncio
 import json
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from loguru import logger
 from sqlalchemy import func, select
@@ -34,9 +33,6 @@ _DEDUP_SIM_THRESHOLD = 0.62  # Jaccard（归一化 token 集）
 # page-merge 缩水保护：合并后长度 < 原文 70% 视为疑似截断
 _MERGE_SHRINK_LIMIT = 0.70
 # 晋升门槛（swarmvault 裁剪：可提交晋升的硬条件）
-_PROMOTE_MIN_SOURCES = 3
-_PROMOTE_MIN_CONFIDENCE = 0.80
-
 # ---------------------------------------------------------------- Prompt
 
 _MAP_SYSTEM_PROMPT = """你是知识库编译器（Map 阶段）。从给定原始资料中提取结构化 Wiki 词条。
@@ -78,12 +74,14 @@ def _jaccard(a: set[str], b: set[str]) -> float:
 
 # ---------------------------------------------------------------- LLM 复用
 
-from src.plugins.builtin.knowledge_base.pipeline.memory import _call_llm_json  # noqa: E402
-from src.plugins.builtin.knowledge_base.pipeline.memory import _strip_code_fences  # noqa: E402
+from src.plugins.builtin.knowledge_base.pipeline.memory import (  # noqa: E402
+    _call_llm_json,
+    _strip_code_fences,
+)
 
 
 def _parse_pages(raw: str) -> list[dict]:
-    """解析 Map 输出（复用记忆层的双层降级思想）。"""
+    """解析 Map 输出（复用记忆层的双层降级思想 + 截断宽容）。"""
     if not raw:
         return []
     text = raw.strip()
@@ -94,6 +92,17 @@ def _parse_pages(raw: str) -> list[dict]:
             break
         except (json.JSONDecodeError, ValueError):
             continue
+    if data is None:
+        # 截断宽容（max_tokens 用尽时 JSON 尾部不完整）：抓取完整的扁平
+        # page 对象重组重试；含嵌套 {} 的对象可能被切碎，逐个收缩重试。
+        # 部分词条仍可用，比整单作废好。
+        objs = re.findall(r'\{[^{}]*"slug"[^{}]*\}', text)
+        while objs:
+            try:
+                data = json.loads('{"pages": [' + ",".join(objs) + "]}")
+                break
+            except (json.JSONDecodeError, ValueError):
+                objs.pop()  # 最后一个对象可能被切碎 → 收缩重试
     if data is None:
         start, end = text.find("{"), text.rfind("}")
         if start != -1 and end > start:
@@ -144,7 +153,6 @@ def renumber_inline_citations(body_md: str, source_refs: list[dict]) -> str:
     source_refs 顺序即编号（1-based）。
     """
     n_refs = len(source_refs)
-    used = sorted({int(m) for m in re.findall(r"\[(\d+)\]", body_md) if m.isdigit()})
     # 超界引用删除
     body_md = re.sub(
         r"\[(\d+)\]",
@@ -175,17 +183,23 @@ def renumber_inline_citations(body_md: str, source_refs: list[dict]) -> str:
 
 # ---------------------------------------------------------------- 主管线
 
-async def compile_space(space_id: int, doc_ids: list[int] | None = None) -> dict:
+async def compile_space(
+    space_id: int, doc_ids: list[int] | None = None, category_id: int | None = None,
+) -> dict:
     """编译空间：把（未编译过的）原始资料编译成词条。返回统计。
 
     v1 简化：一次任务编译全部未编译资料（或指定 doc_ids），
     Map 每篇 1 次 LLM；Reduce 仅存疑页（slug 命中且内容变化）追加 1 次。
+    category_id：推送甄选归类——产出/更新的词条挂该分类（AI 自主维护分类的落点）。
     """
     from src.plugins.builtin.knowledge_base.models import (
         KbDocSource,
         KbWikiPage,
         KbWikiRevision,
     )
+    from src.plugins.builtin.knowledge_base.pipeline.hub import get_hub_space_id
+
+    is_hub = space_id == (await get_hub_space_id())
 
     async with SessionLocal() as db:
         stmt = select(KbDocSource).where(KbDocSource.space_id == space_id)
@@ -209,11 +223,13 @@ async def compile_space(space_id: int, doc_ids: list[int] | None = None) -> dict
 
         stats = {"docs": len(docs), "pages_new": 0, "pages_merged": 0, "pages_rejected": 0, "llm_calls": 0}
         refs = build_source_refs(docs)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         for doc in docs:
             source_text = doc.content[:_MAX_SOURCE_CHARS]
-            raw = await _call_llm_json(_MAP_SYSTEM_PROMPT, source_text, max_tokens=1800, temperature=0.2)
+            # max_tokens 与拆词条规模匹配（6k 字资料拆 3~8 词条需约 2~4k token；
+            # 截断由 _parse_pages 兜底宽容修复，但首选一次到位）
+            raw = await _call_llm_json(_MAP_SYSTEM_PROMPT, source_text, max_tokens=4000, temperature=0.2)
             stats["llm_calls"] += 1
             if raw is None:
                 logger.warning(f"[KB] doc={doc.id} Map 提取失败（LLM 返回空）")
@@ -221,8 +237,6 @@ async def compile_space(space_id: int, doc_ids: list[int] | None = None) -> dict
             pages = _parse_pages(raw)
             if not pages:
                 continue
-
-            new_tokens = _norm_tokens(source_text)
 
             for item in pages:
                 slug = item["slug"]
@@ -237,11 +251,12 @@ async def compile_space(space_id: int, doc_ids: list[int] | None = None) -> dict
                     # ---- 新建词条（candidate 态）----
                     page = KbWikiPage(
                         space_id=space_id,
+                        category_id=category_id,
                         slug=slug,
                         title=item["title"],
                         body_md=renumber_inline_citations(item["body_md"], refs),
                         source_refs=json.dumps(refs, ensure_ascii=False),
-                        status="candidate",
+                        status="live" if is_hub else "candidate",
                         confidence=0.5,
                         source_count=len(docs),
                         last_edit_source="pipeline",
@@ -265,7 +280,7 @@ async def compile_space(space_id: int, doc_ids: list[int] | None = None) -> dict
                     merged = await _call_llm_json(
                         _REDUCE_SYSTEM_PROMPT,
                         f"【old_body】\n{page.body_md}\n\n【new_body】\n{item['body_md']}",
-                        max_tokens=1600, temperature=0.3,
+                        max_tokens=3000, temperature=0.3,
                     )
                     stats["llm_calls"] += 1
                     if merged is None:
@@ -302,7 +317,7 @@ async def compile_space(space_id: int, doc_ids: list[int] | None = None) -> dict
                 )
             )
         ).scalar_one()
-        space = await db.get(_SPACE_MODEL(), space_id)
+        space = await db.get(_space_model(), space_id)
         if space is not None:
             space.page_count = page_total
         await db.commit()
@@ -311,7 +326,7 @@ async def compile_space(space_id: int, doc_ids: list[int] | None = None) -> dict
     return stats
 
 
-def _SPACE_MODEL():
+def _space_model():
     from src.plugins.builtin.knowledge_base.models import KbSpace
     return KbSpace
 
@@ -361,154 +376,6 @@ async def _relink_space(space_id: int) -> None:
 
 
 # ---------------------------------------------------------------- 晋升流
-
-def _promotion_hash(snapshot_md: str, target_space_id: int) -> str:
-    import hashlib
-    h = hashlib.blake2b(f"{target_space_id}:{snapshot_md}".encode(), digest_size=24).hexdigest()
-    return h
-
-
-async def submit_promotion(
-    page_id: int, user_id: int, target_space_id: int, submit_note: str = ""
-) -> dict:
-    """提交晋升申请：冻结快照 + 内容寻址去重。"""
-    from src.plugins.builtin.knowledge_base.models import KbPromotion, KbSpace, KbWikiPage
-
-    async with SessionLocal() as db:
-        page = await db.get(KbWikiPage, page_id)
-        if page is None or page.is_deleted:
-            return {"ok": False, "msg": "词条不存在"}
-        space = await db.get(KbSpace, page.space_id)
-        if space is None or space.owner_user_id != user_id:
-            return {"ok": False, "msg": "仅词条所有者可提交晋升"}
-        target = await db.get(KbSpace, target_space_id)
-        if target is None or target.visibility != "public":
-            return {"ok": False, "msg": "目标空间不是公开空间"}
-
-        id_hash = _promotion_hash(page.body_md, target_space_id)
-        dup = (
-            await db.execute(
-                select(KbPromotion).where(
-                    KbPromotion.id_hash == id_hash,
-                    KbPromotion.status.in_(("draft", "submitted")),
-                )
-            )
-        ).scalars().first()
-        if dup is not None:
-            return {"ok": False, "msg": f"相同内容已有待审申请 #{dup.id}"}
-
-        # 门槛校验（swarmvault 裁剪）
-        if page.source_count < _PROMOTE_MIN_SOURCES:
-            return {"ok": False, "msg": f"来源数不足（{page.source_count}/{_PROMOTE_MIN_SOURCES}）"}
-        if page.confidence < _PROMOTE_MIN_CONFIDENCE:
-            return {"ok": False, "msg": f"置信度不足（{page.confidence:.2f}/{_PROMOTE_MIN_CONFIDENCE})"}
-
-        promo = KbPromotion(
-            page_id=page_id,
-            source_space_id=page.space_id,
-            target_space_id=target_space_id,
-            status="submitted",
-            snapshot_md=page.body_md,          # 冻结快照
-            snapshot_slug=page.slug,
-            snapshot_title=page.title,
-            submit_note=submit_note[:500],
-            submitted_by=user_id,
-            id_hash=id_hash,
-        )
-        db.add(promo)
-        await db.commit()
-        return {"ok": True, "promotion_id": promo.id}
-
-
-async def review_promotion(
-    promotion_id: int, reviewer_id: int, approve: bool, comment: str = ""
-) -> dict:
-    """审核晋升：批准=快照复制入公开库（draft 态，溯源字段三连），拒绝=留意见。"""
-    from src.plugins.builtin.knowledge_base.models import (
-        KbPromotion,
-        KbSetting,
-        KbSpace,
-        KbWikiPage,
-        KbWikiRevision,
-    )
-
-    async with SessionLocal() as db:
-        promo = await db.get(KbPromotion, promotion_id)
-        if promo is None or promo.status != "submitted":
-            return {"ok": False, "msg": "申请不存在或不在待审状态"}
-        if promo.submitted_by == reviewer_id:
-            # 自审策略可配置（kb_setting.promote_allow_self_review，默认 false）
-            setting = (await db.execute(
-                select(KbSetting).where(
-                    KbSetting.key == "promote_allow_self_review", KbSetting.user_id == 0
-                )
-            )).scalars().first()
-            allowed = bool(setting and str(setting.value).strip().lower() in ("true", "1", '"true"'))
-            if not allowed:
-                return {"ok": False, "msg": "不能审核自己提交的晋升申请，请由其他维护者复核"}
-
-        if not approve:
-            promo.status = "rejected"
-            promo.reviewed_by = reviewer_id
-            promo.review_comment = comment[:500]
-            await db.commit()
-            return {"ok": True, "status": "rejected"}
-
-        # 批准：公开库生成独立副本（PR 合并心智——快照复制，非引用）
-        target = await db.get(KbSpace, promo.target_space_id)
-        if target is None or target.visibility != "public":
-            return {"ok": False, "msg": "目标空间已不可用"}
-
-        # 同 slug 冲突：后缀 -public 区分（保持简单，不做 LLM 合并）
-        base_slug = promo.snapshot_slug
-        slug = base_slug
-        n = 1
-        while (
-            await db.execute(
-                select(KbWikiPage).where(
-                    KbWikiPage.space_id == target.id,
-                    KbWikiPage.slug == slug,
-                    KbWikiPage.is_deleted == False,  # noqa: E712
-                )
-            )
-        ).scalars().first() is not None:
-            n += 1
-            slug = f"{base_slug}-{n}"
-
-        published = KbWikiPage(
-            space_id=target.id,
-            slug=slug,
-            title=promo.snapshot_title,
-            body_md=promo.snapshot_md,
-            source_refs="[]",
-            status="draft",  # 维护者再发布为 live（PandaWiki 三态）
-            confidence=0.9,
-            source_count=1,
-            last_edit_source="user",
-            version=1,
-            # 溯源三连（PR 合并署名）
-            origin_space_id=promo.source_space_id,
-            origin_page_id=promo.page_id,
-            origin_author_id=promo.submitted_by,
-        )
-        db.add(published)
-        await db.flush()
-        db.add(KbWikiRevision(
-            page_id=published.id, version=1, body_md=promo.snapshot_md,
-            edit_source="user", editor_id=reviewer_id,
-            is_machine_snapshot=False, note="晋升发布",
-        ))
-
-        promo.status = "approved"
-        promo.reviewed_by = reviewer_id
-        promo.review_comment = comment[:500]
-        promo.published_page_id = published.id
-        await db.commit()
-
-        target.page_count += 1
-        await db.commit()
-        return {"ok": True, "status": "approved", "published_page_id": published.id}
-
 
 async def publish_page(page_id: int, user_id: int, status: str = "live") -> dict:
     """维护者发布/归档公开库词条（PandaWiki 三态流转）。"""

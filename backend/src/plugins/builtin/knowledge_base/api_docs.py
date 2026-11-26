@@ -1,13 +1,15 @@
 """文档管理 API（N1）——空间内文档的上传/列表/详情/删除/重新编译。
 
 .. pattern:: 与 api_wiki 同纪律
-   - 行级隔离：ensure_space_access（读=成员，写=writer/owner）
+   - 行级隔离：ensure_space_access（周期三：读写均仅空间 owner）
    - 响应统一信封
 """
 import json
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -175,8 +177,9 @@ async def upload_doc_file(
 ):
     """文件上传入库：md/txt 直读，pdf（pypdf）、docx（python-docx）解析为文本。
 
-    file_ext 记录原始扩展名，供下载还原文件名（文档正文入库为文本，下载时
-    以 Markdown 形式给出；上传型文档优先用原始扩展名）。
+    原始文件字节存插件上传目录（uploads/plugins/knowledge_base/docs/），
+    下载时优先返回原文件（PDF 下载回来还是排版完好的 PDF）；
+    无原始文件（粘贴文本/聊天结论/爬取）下载给 Markdown 文本。
     """
     data = await file.read()
     try:
@@ -195,7 +198,28 @@ async def upload_doc_file(
     )
     if not result.get("ok"):
         raise HTTPException(status_code=400, detail=result.get("msg"))
+
+    # 保存原始文件字节（幂等：同内容重复上传复用同一 doc）
+    if ext:
+        _save_raw_file(result.get("doc_id"), ext, data)
     return success_response(data=result, msg="上传成功，已入编译队列")
+
+
+def _raw_dir() -> Path:
+    from src.core.config import settings
+
+    d = Path(settings.PLUGINS_UPLOAD_DIR) / "knowledge_base" / "docs"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _save_raw_file(doc_id: int | None, ext: str, data: bytes) -> None:
+    if not doc_id or not ext or not data:
+        return
+    try:
+        (_raw_dir() / f"{doc_id}.{ext}").write_bytes(data)
+    except OSError as exc:
+        logger.warning(f"[KnowledgeBase] 原始文件保存失败 doc={doc_id}: {exc}")
 
 
 @router.post("/spaces/{space_id}/docs")
@@ -234,10 +258,10 @@ async def download_doc(
     user: Annotated[User, Depends(get_current_user)],
     _perm: Annotated[User, Depends(_require_perm("knowledge_base:space:list"))],
 ):
-    """下载文档正文（Markdown 文本流；上传型文档用原始扩展名还原文件名）。
+    """下载文档：优先返回上传的原始文件字节（PDF 还是排版完好的 PDF）。
 
-    说明：入库的是解析后文本而非原始二进制，下载给出的是可编辑的 .md/.txt；
-    pdf/docx 上传的下载同样给出解析后的 Markdown（保语义可编辑）。
+    回退链：原始文件存在 → 原文件（原始扩展名）；
+    无原始文件（粘贴文本/聊天结论/爬取/调研）→ Markdown 文本（.md）。
     """
     ok, msg = await ensure_space_access(user.id, space_id, need_write=False)
     if not ok:
@@ -253,16 +277,33 @@ async def download_doc(
 
     # 文件名：去除路径分隔符防注入，空格/斜杠替换
     safe_title = (doc.title or "document").replace("/", "_").replace("\\", "_").replace(" ", "_")[:80]
-    ext = (doc.file_ext or "").lower()
-    if ext not in _DOC_DOWNLOAD_EXT:
-        ext = "md"  # 聊天/网页/调研等文本型文档统一 Markdown
-    media_type = _DOC_DOWNLOAD_EXT[ext]
-    filename = f"{safe_title}.{ext}"
 
     from urllib.parse import quote
 
+    # ① 原始文件（上传时保存了字节）
+    raw_ext = (doc.file_ext or "").lower()
+    if raw_ext:
+        raw_path = _raw_dir() / f"{doc.id}.{raw_ext}"
+        if raw_path.is_file():
+            raw = raw_path.read_bytes()
+            quoted = quote(f"{safe_title}.{raw_ext}")
+            media = _DOC_DOWNLOAD_EXT.get(raw_ext, "application/octet-stream")
+            from fastapi.responses import Response
+
+            return Response(
+                content=raw,
+                media_type=media,
+                headers={
+                    "Content-Disposition": f"attachment; filename*=UTF-8''{quoted}",
+                },
+            )
+
+    # ② 文本型回退：Markdown
     from fastapi.responses import Response
 
+    ext = "md"
+    media_type = _DOC_DOWNLOAD_EXT[ext]
+    filename = f"{safe_title}.{ext}"
     quoted = quote(filename)
     return Response(
         content=doc.content,

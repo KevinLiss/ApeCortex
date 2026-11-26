@@ -1,8 +1,8 @@
-"""知识库 Wiki 层 REST API（P1）：空间/词条/晋升/任务。
+"""知识库 Wiki 层 REST API（P1）：空间/词条/任务（周期三：晋升流与共享空间已下线）。
 
 .. pattern:: 与 P0 api.py 同纪律
-   - 行级隔离：私有内容强制 owner 过滤
-   - 公开库写入硬校验：非晋升流、非维护者的写操作一律 403
+   - 行级隔离：个人空间强制 owner 过滤
+   - 知识中心写入仅经推送流（submission 管线），本模块无直写入口
    - 响应解包（前端教训）：全部走统一信封
 """
 import json
@@ -12,13 +12,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.deps import get_current_user, get_user_permissions
+from src.core.deps import get_current_user
 from src.core.deps import require_permission as _require_perm
 from src.core.exceptions import success_response
 from src.db import get_db
 from src.models import User
 from src.plugins.builtin.knowledge_base.models import (
-    KbPromotion,
     KbSpace,
     KbWikiPage,
     KbWikiRevision,
@@ -26,13 +25,9 @@ from src.plugins.builtin.knowledge_base.models import (
 from src.plugins.builtin.knowledge_base.pipeline import jobs as jobs_mod
 from src.plugins.builtin.knowledge_base.pipeline.compiler import (
     publish_page,
-    review_promotion,
-    submit_promotion,
 )
 from src.plugins.builtin.knowledge_base.pipeline.ingest_api import (
     create_space,
-    ensure_owned_space,
-    ensure_space_access,
     get_space_role,
     ingest_doc,
     list_spaces,
@@ -48,7 +43,7 @@ async def get_spaces(
     user: Annotated[User, Depends(get_current_user)],
     _perm: Annotated[User, Depends(_require_perm("knowledge_base:space:list"))],
 ):
-    """空间列表：自己的 + 公开的。"""
+    """空间列表：自己的个人知识库。"""
     return success_response(data={"items": await list_spaces(user.id)})
 
 
@@ -57,18 +52,10 @@ async def post_space(
     body: dict,
     user: Annotated[User, Depends(get_current_user)],
     _perm: Annotated[User, Depends(_require_perm("knowledge_base:space:create"))],
-    db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """创建空间：私有/共享人人可建；公开空间仅知识库维护者可建（路由层校验）。"""
-    vis = (body.get("visibility") or "private").lower()
-    if vis not in ("private", "shared", "public"):
-        raise HTTPException(status_code=400, detail="可见性仅支持 private / shared / public")
-    if vis == "public":
-        perms = get_user_permissions(user)
-        if "*" not in perms and "knowledge_base:promotion:review" not in perms:
-            raise HTTPException(status_code=403, detail="仅知识库维护者可创建公开空间")
+    """创建空间（个人知识库，无类型概念）。"""
     result = await create_space(
-        user.id, body.get("name", ""), body.get("description", ""), vis
+        user.id, body.get("name", ""), body.get("description", "")
     )
     if not result.get("ok"):
         raise HTTPException(status_code=400, detail=result.get("msg"))
@@ -105,14 +92,14 @@ async def get_pages(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
 ):
-    """空间词条列表（owner/writer 全状态；reader 与公开访客只看 live/draft）。"""
+    """空间词条列表（周期三：个人库 owner 全状态；非 owner 403）。"""
     space = await db.get(KbSpace, space_id)
     if space is None or space.status != "active":
         raise HTTPException(status_code=404, detail="空间不存在")
     role = await get_space_role(user.id, space_id)
     if role is None:
-        raise HTTPException(status_code=403, detail="无权访问该空间（非成员）")
-    can_edit = role in ("owner", "writer")
+        raise HTTPException(status_code=403, detail="无权访问该空间（非所有者）")
+    can_edit = role == "owner"
 
     conditions = [KbWikiPage.space_id == space_id, KbWikiPage.is_deleted == False]  # noqa: E712
     if not can_edit:
@@ -158,7 +145,7 @@ async def get_page(
     user: Annotated[User, Depends(get_current_user)],
     _perm: Annotated[User, Depends(_require_perm("knowledge_base:page:list"))],
 ):
-    """词条详情：owner/writer=全状态；reader/公开=live/draft；无权=404。"""
+    """词条详情（周期三：owner 全状态；非 owner 只看 live/draft；无权=404）。"""
     p = await db.get(KbWikiPage, page_id)
     if p is None or p.is_deleted:
         raise HTTPException(status_code=404, detail="词条不存在")
@@ -168,7 +155,7 @@ async def get_page(
     role = await get_space_role(user.id, p.space_id)
     if role is None:
         raise HTTPException(status_code=404, detail="词条不存在")
-    if role not in ("owner", "writer") and p.status not in ("live", "draft"):
+    if role != "owner" and p.status not in ("live", "draft"):
         raise HTTPException(status_code=404, detail="词条不存在")
     return success_response(data={
         **_page_brief(p),
@@ -188,7 +175,7 @@ async def put_page(
 ):
     """编辑词条（乐观锁：body.expected_version 与库不匹配返回 409）。
 
-    私有/共享词条：owner 或 writer 成员可编辑；公开库词条：仅 owner（维护者）。
+    周期三：个人库仅 owner 可编辑；知识中心写入仅经推送流。
     人工编辑保护：last_edit_source=user，revision 记录人工修订（不参与机器裁剪）。
     """
     p = await db.get(KbWikiPage, page_id)
@@ -196,12 +183,8 @@ async def put_page(
         raise HTTPException(status_code=404, detail="词条不存在")
     space = await db.get(KbSpace, p.space_id)
     role = await get_space_role(user.id, p.space_id)
-    if space is None or role is None:
-        raise HTTPException(status_code=403, detail="无权编辑该词条")
-    if space.visibility == "public" and role != "owner":
-        raise HTTPException(status_code=403, detail="公开库词条仅空间维护者可编辑")
-    if role not in ("owner", "writer"):
-        raise HTTPException(status_code=403, detail="仅空间所有者或 writer 成员可编辑词条")
+    if space is None or role != "owner":
+        raise HTTPException(status_code=403, detail="仅空间所有者可编辑词条")
 
     expected = body.get("expected_version")
     if expected is not None and expected != p.version:
@@ -270,128 +253,6 @@ async def post_publish(
 
 # ---------------------------------------------------------------- 晋升流
 
-@router.post("/promotions")
-async def post_promotion(
-    body: dict,
-    user: Annotated[User, Depends(get_current_user)],
-    _perm: Annotated[User, Depends(_require_perm("knowledge_base:promotion:submit"))],
-):
-    """提交晋升申请：私库词条 → 公开空间（冻结快照）。"""
-    result = await submit_promotion(
-        body.get("page_id", 0), user.id,
-        body.get("target_space_id", 0), body.get("submit_note", ""),
-    )
-    if not result.get("ok"):
-        raise HTTPException(status_code=400, detail=result.get("msg"))
-    return success_response(data=result, msg="晋升申请已提交")
-
-
-@router.get("/promotions")
-async def get_promotions(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    user: Annotated[User, Depends(get_current_user)],
-    _perm: Annotated[User, Depends(_require_perm("knowledge_base:promotion:review"))],
-    status: str | None = Query(default=None),
-    page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=20, ge=1, le=100),
-):
-    """晋升申请列表（审核视角）。"""
-    conditions = []
-    if status:
-        conditions.append(KbPromotion.status == status)
-    stmt = (
-        select(KbPromotion)
-        .where(*conditions)
-        .order_by(KbPromotion.id.desc())
-        .offset((page - 1) * page_size).limit(page_size)
-    )
-    items = (await db.execute(stmt)).scalars().all()
-    total = (await db.execute(
-        select(func.count()).select_from(KbPromotion).where(*conditions)
-    )).scalar_one()
-    from src.plugins.builtin.knowledge_base.models import KbSetting
-
-    self_review_setting = (await db.execute(
-        select(KbSetting).where(
-            KbSetting.key == "promote_allow_self_review", KbSetting.user_id == 0
-        )
-    )).scalars().first()
-    allow_self_review = bool(
-        self_review_setting
-        and str(self_review_setting.value).strip().lower() in ("true", "1", '"true"')
-    )
-    # 目标空间同 slug 现版（冲突感知：批准会创建 -2 后缀副本）
-    current_map: dict[tuple[int, str], dict] = {}
-    targets = {(r.target_space_id, r.snapshot_slug) for r in items}
-    if targets:
-        space_ids = {t[0] for t in targets}
-        slugs = {t[1] for t in targets}
-        current_rows = list((await db.execute(
-            select(KbWikiPage).where(
-                KbWikiPage.space_id.in_(space_ids),
-                KbWikiPage.slug.in_(slugs),
-                KbWikiPage.is_deleted == False,  # noqa: E712
-            )
-        )).scalars().all())
-        for p in current_rows:
-            current_map[(p.space_id, p.slug)] = {
-                "id": p.id, "version": p.version, "status": p.status, "title": p.title,
-            }
-
-    return success_response(data={
-        "total": total,
-        "items": [{
-            "id": r.id, "page_id": r.page_id, "source_space_id": r.source_space_id,
-            "target_space_id": r.target_space_id, "status": r.status,
-            "snapshot_slug": r.snapshot_slug, "snapshot_title": r.snapshot_title,
-            "snapshot_md": r.snapshot_md, "submit_note": r.submit_note,
-            "submitted_by": r.submitted_by, "review_comment": r.review_comment,
-            "published_page_id": r.published_page_id,
-            # 自审制衡：自己的申请不显示批准/拒绝（后端另有硬校验；可由设置放开）
-            "can_review": allow_self_review or r.submitted_by != user.id,
-            "current_page": current_map.get((r.target_space_id, r.snapshot_slug)),
-        } for r in items],
-    })
-
-
-@router.get("/promotions/mine")
-async def get_my_promotions(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    user: Annotated[User, Depends(get_current_user)],
-    _perm: Annotated[User, Depends(_require_perm("knowledge_base:promotion:submit"))],
-):
-    """我提交的晋升申请（提交人视角）。"""
-    rows = list((
-        await db.execute(
-            select(KbPromotion).where(KbPromotion.submitted_by == user.id)
-            .order_by(KbPromotion.id.desc()).limit(50)
-        )
-    ).scalars().all())
-    return success_response(data={"items": [{
-        "id": r.id, "page_id": r.page_id, "target_space_id": r.target_space_id,
-        "status": r.status, "submit_note": r.submit_note,
-        "review_comment": r.review_comment, "published_page_id": r.published_page_id,
-    } for r in rows]})
-
-
-@router.post("/promotions/{promotion_id}/review")
-async def post_review(
-    promotion_id: int,
-    body: dict,
-    user: Annotated[User, Depends(get_current_user)],
-    _perm: Annotated[User, Depends(_require_perm("knowledge_base:promotion:review"))],
-):
-    """审核晋升申请（approve=true 批准发布，false 拒绝）。"""
-    result = await review_promotion(
-        promotion_id, user.id, bool(body.get("approve")), body.get("comment", "")
-    )
-    if not result.get("ok"):
-        raise HTTPException(status_code=400, detail=result.get("msg"))
-    return success_response(data=result, msg="审核完成")
-
-
-# ---------------------------------------------------------------- 任务
-
 @router.get("/jobs")
 async def get_jobs(
     user: Annotated[User, Depends(get_current_user)],
@@ -429,12 +290,11 @@ async def retry_job(
         raise HTTPException(status_code=404, detail="任务不存在")
     if detail["status"] not in ("failed",):
         raise HTTPException(status_code=400, detail="仅失败任务可重试")
-    from src.plugins.builtin.knowledge_base.pipeline.jobs import enqueue_job
+    from src.db import SessionLocal
 
     # 重新入队同类型任务（用原 payload 反解）
     from src.plugins.builtin.knowledge_base.models import KbJob
-
-    from src.db import SessionLocal
+    from src.plugins.builtin.knowledge_base.pipeline.jobs import enqueue_job
     async with SessionLocal() as db:
         orig = await db.get(KbJob, job_id)
         payload = json.loads(orig.payload or "{}") if orig else {}
@@ -470,13 +330,14 @@ async def put_web_settings(
 
     .. warning:: 开启联网=数据外发。body: {web_enabled: bool, domain_allow: [str]}
     """
+    import json
+
+    from src.db import SessionLocal
     from src.plugins.builtin.knowledge_base.collector.web import (
         get_domain_allowlist,
         set_web_enabled,
     )
     from src.plugins.builtin.knowledge_base.models import KbSetting
-    from src.db import SessionLocal
-    import json
 
     enable = bool(body.get("web_enabled"))
     if enable and not body.get("confirm"):  # 开启需显式确认（数据外发）
@@ -509,214 +370,6 @@ async def put_web_settings(
 
 
 # ---------------------------------------------------------------- 贡献统计（P3）
-
-@router.get("/contributions")
-async def get_contributions(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    user: Annotated[User, Depends(get_current_user)],
-    _perm: Annotated[User, Depends(_require_perm("knowledge_base:page:list"))],
-    range: str = Query(default="all", description="all/week/month（按更新时间窗）"),
-):
-    """公开库贡献榜（谁贡献了多少已发布词条）+ 个人贡献摘要。"""
-    from datetime import datetime, timedelta, timezone
-
-    from src.models import User as SysUser
-
-    # 公开库 live 词条聚合
-    stmt = (
-        select(
-            KbWikiPage.origin_author_id,
-            func.count(KbWikiPage.id),
-        )
-        .join(KbSpace, KbWikiPage.space_id == KbSpace.id)
-        .where(
-            KbSpace.visibility == "public",
-            KbWikiPage.status == "live",
-            KbWikiPage.origin_author_id.isnot(None),
-            KbWikiPage.is_deleted == False,  # noqa: E712
-        )
-        .group_by(KbWikiPage.origin_author_id)
-        .order_by(func.count(KbWikiPage.id).desc())
-        .limit(10)
-    )
-    if range in ("week", "month"):
-        days = 7 if range == "week" else 30
-        stmt = stmt.where(KbWikiPage.updated_at >= datetime.now(timezone.utc) - timedelta(days=days))
-    rows = (await db.execute(stmt)).all()
-
-    # 补充用户名
-    author_ids = [r[0] for r in rows if r[0]]
-    names: dict[int, str] = {}
-    if author_ids:
-        users = (await db.execute(
-            select(SysUser.id, SysUser.nickname, SysUser.username).where(SysUser.id.in_(author_ids))
-        )).all()
-        names = {u[0]: u[1] or u[2] for u in users}
-
-    board = [
-        {"author_id": aid, "author": names.get(aid, f"#{aid}"), "pages": cnt}
-        for aid, cnt in rows
-    ]
-
-    # 个人统计（当前用户：晋升通过数 + 在库草稿数）
-    mine_stmt = select(func.count()).select_from(KbPromotion).where(
-        KbPromotion.submitted_by == user.id, KbPromotion.status == "approved"
-    )
-    my_approved = (await db.execute(mine_stmt)).scalar_one()
-    my_pending = (await db.execute(
-        select(func.count()).select_from(KbPromotion).where(
-            KbPromotion.submitted_by == user.id, KbPromotion.status == "submitted"
-        )
-    )).scalar_one()
-
-    return success_response(data={
-        "board": board,
-        "mine": {"approved": my_approved, "pending": my_pending},
-    })
-
-
-# ---------------------------------------------------------------- 共享空间成员（M3）
-
-@router.get("/spaces/{space_id}/members")
-async def get_space_members(
-    space_id: int,
-    db: Annotated[AsyncSession, Depends(get_db)],
-    user: Annotated[User, Depends(get_current_user)],
-    _perm: Annotated[User, Depends(_require_perm("knowledge_base:space:list"))],
-):
-    """成员列表（仅空间所有者可查看/管理）。"""
-    from src.models import User as SysUser
-    from src.plugins.builtin.knowledge_base.models import KbSpaceMember
-
-    role = await get_space_role(user.id, space_id)
-    if role != "owner":
-        raise HTTPException(status_code=403, detail="仅空间所有者可管理成员")
-
-    rows = list((await db.execute(
-        select(KbSpaceMember).where(KbSpaceMember.space_id == space_id)
-        .order_by(KbSpaceMember.id.asc())
-    )).scalars().all())
-    user_ids = [m.user_id for m in rows]
-    names: dict[int, str] = {}
-    if user_ids:
-        for u in (await db.execute(
-            select(SysUser.id, SysUser.nickname, SysUser.username).where(SysUser.id.in_(user_ids))
-        )).all():
-            names[u[0]] = u[1] or u[2]
-    return success_response(data={"items": [
-        {"user_id": m.user_id, "role": m.role, "name": names.get(m.user_id, f"#{m.user_id}")}
-        for m in rows
-    ]})
-
-
-@router.post("/spaces/{space_id}/members")
-async def add_space_member(
-    space_id: int,
-    body: dict,
-    db: Annotated[AsyncSession, Depends(get_db)],
-    user: Annotated[User, Depends(get_current_user)],
-    _perm: Annotated[User, Depends(_require_perm("knowledge_base:space:create"))],
-):
-    """添加/更新成员（owner 操作，仅共享空间）。body: {user_id, role: reader|writer}"""
-    from src.models import User as SysUser
-    from src.plugins.builtin.knowledge_base.models import KbSpaceMember
-
-    space = await db.get(KbSpace, space_id)
-    if space is None or space.status != "active":
-        raise HTTPException(status_code=404, detail="空间不存在")
-    if space.owner_user_id != user.id:
-        raise HTTPException(status_code=403, detail="仅空间所有者可添加成员")
-    if space.visibility != "shared":
-        raise HTTPException(status_code=400, detail="仅共享空间支持成员管理（请先切换为共享）")
-
-    try:
-        member_id = int(body.get("user_id"))
-    except (TypeError, ValueError):
-        raise HTTPException(status_code=400, detail="user_id 不合法")
-    member_role = (body.get("role") or "reader").lower()
-    if member_role not in ("reader", "writer"):
-        raise HTTPException(status_code=400, detail="role 仅支持 reader / writer")
-    if member_id == user.id:
-        raise HTTPException(status_code=400, detail="空间所有者无需添加为成员")
-
-    target = await db.get(SysUser, member_id)
-    if target is None or target.status != 1:
-        raise HTTPException(status_code=404, detail="用户不存在或已停用")
-
-    existing = (await db.execute(
-        select(KbSpaceMember).where(
-            KbSpaceMember.space_id == space_id, KbSpaceMember.user_id == member_id
-        )
-    )).scalars().first()
-    if existing is not None:
-        existing.role = member_role
-    else:
-        db.add(KbSpaceMember(space_id=space_id, user_id=member_id, role=member_role))
-    await db.commit()
-    return success_response(data={"user_id": member_id, "role": member_role}, msg="成员已保存")
-
-
-@router.delete("/spaces/{space_id}/members/{member_id}")
-async def remove_space_member(
-    space_id: int,
-    member_id: int,
-    db: Annotated[AsyncSession, Depends(get_db)],
-    user: Annotated[User, Depends(get_current_user)],
-    _perm: Annotated[User, Depends(_require_perm("knowledge_base:space:create"))],
-):
-    """移除成员（owner 操作）。"""
-    from src.plugins.builtin.knowledge_base.models import KbSpaceMember
-
-    space = await db.get(KbSpace, space_id)
-    if space is None or space.owner_user_id != user.id:
-        raise HTTPException(status_code=403, detail="仅空间所有者可移除成员")
-    row = (await db.execute(
-        select(KbSpaceMember).where(
-            KbSpaceMember.space_id == space_id, KbSpaceMember.user_id == member_id
-        )
-    )).scalars().first()
-    if row is not None:
-        await db.delete(row)
-        await db.commit()
-    return success_response(data={"user_id": member_id}, msg="成员已移除")
-
-
-# ---------------------------------------------------------------- 待发布队列（M3）
-
-@router.get("/promotions/pending-publish")
-async def pending_publish(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    user: Annotated[User, Depends(get_current_user)],
-    _perm: Annotated[User, Depends(_require_perm("knowledge_base:page:publish"))],
-):
-    """晋升批准后的待发布词条（公开空间 owner 视角）。"""
-    spaces = list((await db.execute(
-        select(KbSpace.id, KbSpace.name).where(
-            KbSpace.owner_user_id == user.id, KbSpace.visibility == "public"
-        )
-    )).all())
-    if not spaces:
-        return success_response(data={"total": 0, "items": []})
-    space_ids = [s[0] for s in spaces]
-    space_names = {s[0]: s[1] for s in spaces}
-    rows = list((await db.execute(
-        select(KbWikiPage).where(
-            KbWikiPage.space_id.in_(space_ids),
-            KbWikiPage.status == "draft",
-            KbWikiPage.origin_page_id.isnot(None),
-            KbWikiPage.is_deleted == False,  # noqa: E712
-        ).order_by(KbWikiPage.id.desc()).limit(100)
-    )).scalars().all())
-    return success_response(data={"total": len(rows), "items": [
-        {
-            **_page_brief(p),
-            "space_name": space_names.get(p.space_id, f"#{p.space_id}"),
-            "origin_author_id": p.origin_author_id,
-        } for p in rows
-    ]})
-
-
-# ---------------------------------------------------------------- 公开库只读凭证（M3）
 
 @router.get("/public-keys")
 async def list_public_keys(

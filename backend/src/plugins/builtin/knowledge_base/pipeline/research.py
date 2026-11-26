@@ -36,8 +36,10 @@ _SECTION_PROMPT = """你是调研报告撰写者。基于检索到的资料写�
 
 # ---------------------------------------------------------------- LLM 复用
 
-from src.plugins.builtin.knowledge_base.pipeline.memory import _call_llm_json  # noqa: E402
-from src.plugins.builtin.knowledge_base.pipeline.memory import _strip_code_fences  # noqa: E402
+from src.plugins.builtin.knowledge_base.pipeline.memory import (  # noqa: E402
+    _call_llm_json,
+    _strip_code_fences,
+)
 
 
 def _parse_outline(raw: str) -> dict | None:
@@ -83,13 +85,13 @@ async def run_research(
     返回 {ok, job_meta, page_id, outline, sections}——page 为 draft 态，
     需人工在词条页确认发布（research.confirm 流程走 publish API）。
     """
+    from src.db import SessionLocal
     from src.plugins.builtin.knowledge_base.collector import academic
     from src.plugins.builtin.knowledge_base.models import (
         KbDocSource,
         KbWikiPage,
         KbWikiRevision,
     )
-    from src.db import SessionLocal
 
     topic = topic.strip()[:200]
     if len(topic) < 4:
@@ -164,13 +166,12 @@ async def run_research(
         sec_raw = await _llm(_SECTION_PROMPT, f"【节标题】{sec['heading']}\n【检索资料】\n{refs_text}", 900)
         body = _strip_code_fences((sec_raw or "").strip())
         if not body:
-            body = f"*（本节生成失败）*"
+            body = "*（本节生成失败）*"
         body_sections.append({"heading": sec["heading"], "body": body})
 
     # ---- 阶段 3：拼装报告 → 草稿词条 ----
     if progress_cb:
         await progress_cb("writing", 90)
-    from datetime import datetime, timezone
 
     parts = [f"# {outline['title']}", ""]
     for sec in body_sections:

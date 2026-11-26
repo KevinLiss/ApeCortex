@@ -10,12 +10,11 @@ Covers the audit-driven hardening batch:
 
 import asyncio
 
-import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from src.api import system as system_module
-from src.api.system import router as system_router, _parse_semver
+from src.api.system import _parse_semver
+from src.api.system import router as system_router
 from src.core import auth_guard
 from src.core.config import settings
 from src.core.redis_client import memory_clear, reset_for_tests
@@ -121,13 +120,10 @@ def test_lockout_redis_shared_store(monkeypatch):
 
 def test_check_update_degrades_when_apehub_unreachable(monkeypatch):
     """Network failure must not raise: reachable=false, has_update=false."""
-    from fastapi import FastAPI
-    from fastapi.testclient import TestClient
 
+    from src.api import system as mod
     from src.core import deps as core_deps
     from src.core.exceptions import register_exception_handlers
-    from src.api import system as mod
-    from src.api.system import router as system_router
     from src.models import User
 
     superadmin = User(id=1, username=settings.SUPER_ADMIN_USERNAME, status=1)

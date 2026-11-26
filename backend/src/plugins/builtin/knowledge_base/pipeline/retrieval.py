@@ -7,11 +7,9 @@
 """
 
 
-from loguru import logger
 from sqlalchemy import select
 
 from src.db import SessionLocal
-
 
 # 相关性纪律（M1）：零命中一律不返回（宁缺毋滥），低覆盖率只标注不丢弃
 _LOW_RELEVANCE_COVERAGE = 0.5
@@ -68,79 +66,72 @@ async def search_all(
     user_id: int,
     query: str,
     limit_per_channel: int = 5,
+    space_ids: list[int] | None = None,
+    include_hub: bool = True,
 ) -> dict:
-    """双通道检索：私有词条 + 公开词条 + 记忆（记忆复用 memory.search_memories）。
+    """检索：个人空间词条 + 知识中心词条 + 记忆（记忆复用 memory.search_memories）。
 
-    返回 {"private_pages": [...], "shared_pages": [...], "public_pages": [...],
-          "memories": [...], "profile_excerpt": str}
+    返回 {"private_pages": [...], "hub_pages": [...], "memories": [...], "profile_excerpt": str}
 
-    M3 三通道：私有（owner 硬过滤）→ 共享（成员连接过滤）→ 公开（live-only）。
+    周期三：个人空间（owner 硬过滤）+ 知识中心（hub space，live-only）；
+    shared 通道下线。space_ids/include_hub 是聊天偏好启用集合的过滤器。
     """
-    from src.plugins.builtin.knowledge_base.models import KbSpace, KbSpaceMember, KbWikiPage
+    from src.plugins.builtin.knowledge_base.models import KbSpace, KbWikiPage
+    from src.plugins.builtin.knowledge_base.pipeline.hub import get_hub_space_id
     from src.plugins.builtin.knowledge_base.pipeline.memory import search_memories
 
     q = query.strip()
     words = _split_words(q) if q else []
     limit = max(1, min(limit_per_channel, 10))
 
+    hub_space_id = await get_hub_space_id() if include_hub else None
+
     async with SessionLocal() as db:
-        # 私有词条（自己的空间，全部状态可见，软删排除）
-        private_cond = (
+        # 个人空间词条（owner 硬过滤；space_ids 为空=全部自己的空间）
+        private_cond = [
             KbSpace.owner_user_id == user_id,
             KbSpace.status == "active",
-        )
-        public_cond = (
-            KbSpace.visibility == "public",
-            KbSpace.status == "active",
-            # 公开库只召回已发布内容（candidate/draft 不外泄）
-            KbWikiPage.status == "live",
-        )
-
-        private_rows = list((
-            await db.execute(
-                select(KbWikiPage, KbSpace.name, KbSpace.visibility)
-                .join(KbSpace, KbWikiPage.space_id == KbSpace.id)
-                .where(
-                    *private_cond,
-                    KbWikiPage.is_deleted == False,  # noqa: E712
+            KbSpace.id != hub_space_id if hub_space_id else True,  # type: ignore[arg-type]
+        ]
+        if space_ids is not None:
+            if not space_ids:
+                private_cond = None
+            else:
+                private_cond.append(KbSpace.id.in_(space_ids))
+        private_pages = []
+        if private_cond:
+            private_rows = list((
+                await db.execute(
+                    select(KbWikiPage, KbSpace.name, KbSpace.visibility)
+                    .join(KbSpace, KbWikiPage.space_id == KbSpace.id)
+                    .where(
+                        *private_cond,
+                        KbWikiPage.is_deleted == False,  # noqa: E712
+                    )
+                    .order_by(KbWikiPage.source_count.desc(), KbWikiPage.updated_at.desc())
+                    .limit(200)
                 )
-                .order_by(KbWikiPage.source_count.desc(), KbWikiPage.updated_at.desc())
-                .limit(200)
-            )
-        ).all())
-        private_pages = [(p, {"id": p.space_id, "name": name, "visibility": vis}) for p, name, vis in private_rows]
+            ).all())
+            private_pages = [(p, {"id": p.space_id, "name": name, "visibility": vis}) for p, name, vis in private_rows]
 
-        public_rows = list((
-            await db.execute(
-                select(KbWikiPage, KbSpace.name, KbSpace.visibility)
-                .join(KbSpace, KbWikiPage.space_id == KbSpace.id)
-                .where(
-                    *public_cond,
-                    KbWikiPage.is_deleted == False,  # noqa: E712
+        # 知识中心词条（hub space，live-only：candidate/draft 不外泄）
+        hub_pages = []
+        if hub_space_id:
+            hub_rows = list((
+                await db.execute(
+                    select(KbWikiPage, KbSpace.name, KbSpace.visibility)
+                    .join(KbSpace, KbWikiPage.space_id == KbSpace.id)
+                    .where(
+                        KbWikiPage.space_id == hub_space_id,
+                        KbSpace.status == "active",
+                        KbWikiPage.status == "live",
+                        KbWikiPage.is_deleted == False,  # noqa: E712
+                    )
+                    .order_by(KbWikiPage.source_count.desc(), KbWikiPage.updated_at.desc())
+                    .limit(200)
                 )
-                .order_by(KbWikiPage.source_count.desc(), KbWikiPage.updated_at.desc())
-                .limit(200)
-            )
-        ).all())
-        public_pages = [(p, {"id": p.space_id, "name": name, "visibility": vis}) for p, name, vis in public_rows]
-
-        # 共享空间（M3）：仅成员可见——成员关系在 SQL 层连接，非成员无召回路径
-        shared_rows = list((
-            await db.execute(
-                select(KbWikiPage, KbSpace.name, KbSpace.visibility)
-                .join(KbSpace, KbWikiPage.space_id == KbSpace.id)
-                .join(KbSpaceMember, KbSpaceMember.space_id == KbSpace.id)
-                .where(
-                    KbSpaceMember.user_id == user_id,
-                    KbSpace.visibility == "shared",
-                    KbSpace.status == "active",
-                    KbWikiPage.is_deleted == False,  # noqa: E712
-                )
-                .order_by(KbWikiPage.source_count.desc(), KbWikiPage.updated_at.desc())
-                .limit(200)
-            )
-        ).all())
-        shared_pages = [(p, {"id": p.space_id, "name": name, "visibility": vis}) for p, name, vis in shared_rows]
+            ).all())
+            hub_pages = [(p, {"id": p.space_id, "name": name, "visibility": vis}) for p, name, vis in hub_rows]
 
         def _fmt(p: KbWikiPage, space: dict) -> dict:
             return {
@@ -149,11 +140,6 @@ async def search_all(
                 "space": space, "visibility": space["visibility"],
                 "origin_author": p.origin_author_id,
             }
-
-        def _space_of(space_id: int) -> dict:
-            if space_id not in space_cache:
-                space_cache[space_id] = {"id": space_id, "name": "?", "visibility": "?"}
-            return space_cache[space_id]
 
         def _rank(pages, weight):
             scored = []
@@ -172,15 +158,16 @@ async def search_all(
             return out
 
         private_out = _rank(private_pages, 1.0)
-        shared_out = _rank(shared_pages, 0.95)
-        public_out = _rank(public_pages, 0.9)
+        hub_out = _rank(hub_pages, 0.9)
 
     memories, profile_excerpt = await search_memories(user_id, q, limit)
 
     return {
         "private_pages": private_out,
-        "shared_pages": shared_out,
-        "public_pages": public_out,
+        "hub_pages": hub_out,
+        # 兼容键（周期三前的调用方）
+        "public_pages": hub_out,
+        "shared_pages": [],
         "memories": memories,
         "profile_excerpt": profile_excerpt,
     }

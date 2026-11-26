@@ -12,7 +12,6 @@ import socket
 from urllib.parse import urlparse
 
 import httpx
-from loguru import logger
 
 # ---------------------------------------------------------------- 护栏
 
@@ -185,7 +184,11 @@ async def _robots_allows(url: str) -> bool:
             d = re.match(r"(?i)disallow:\s*(.*)", line)
             if d and (current_ua in ("*", ua)):
                 rule = d.group(1).strip()
-                if rule and (path.startswith(rule.rstrip("*")) if rule.endswith("*") else path == rule or path.startswith(rule)):
+                matched = (
+                    path.startswith(rule.rstrip("*")) if rule.endswith("*")
+                    else path == rule or path.startswith(rule)
+                )
+                if rule and matched:
                     disallowed = True
         return not disallowed
     except Exception:  # noqa: BLE001

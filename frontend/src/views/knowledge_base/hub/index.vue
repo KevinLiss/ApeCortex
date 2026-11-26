@@ -24,24 +24,15 @@
       </div>
     </div>
 
-    <!-- 视图切换 -->
-    <div class="view-toggle">
-      <el-radio-group v-model="viewMode">
-        <el-radio-button value="category">{{ t('knowledge.hub.viewCategory') }}</el-radio-button>
-        <el-radio-button value="library">{{ t('knowledge.hub.viewLibrary') }}</el-radio-button>
-      </el-radio-group>
-    </div>
-
     <el-row :gutter="16">
       <!-- 左：分类树（按分类视图） -->
-      <el-col v-if="viewMode === 'category'" :xs="24" :md="7" :lg="6">
+      <el-col :xs="24" :md="7" :lg="6">
         <el-card shadow="never" class="cat-panel">
           <div class="cat-scroll">
             <div class="cat-node" :class="{ active: selectedCatId === null }" @click="selectCat(null)">
               <el-icon><Collection /></el-icon>
               <span class="cat-name">{{ t('knowledge.hub.allCategories') }}</span>
-              <span class="cat-count">{{ totalPagesInCat() }}</span>
-            </div>
+                          </div>
             <template v-for="cat in categories" :key="cat.id">
               <div class="cat-node" :class="{ active: selectedCatId === cat.id }" @click="selectCat(cat.id)">
                 <el-icon><component :is="cat.icon || 'Folder'" /></el-icon>
@@ -63,64 +54,13 @@
             <div class="cat-node" :class="{ active: selectedCatId === 0 }" @click="selectCat(0)">
               <el-icon><Folder /></el-icon>
               <span class="cat-name">{{ t('knowledge.hub.uncategorized') }}</span>
-              <span class="cat-count">{{ uncategorizedCount }}</span>
             </div>
           </div>
         </el-card>
       </el-col>
 
       <!-- 右：内容区 -->
-      <el-col :xs="24" :md="viewMode === 'category' ? 17 : 24" :lg="viewMode === 'category' ? 18 : 24">
-        <!-- 按知识库视图：库卡片网格 -->
-        <template v-if="viewMode === 'library' && !selectedSpaceId">
-          <div class="lib-grid" v-loading="spacesLoading">
-            <div v-for="s in hubSpaces" :key="s.id" class="lib-card" @click="openSpace(s.id)">
-              <div class="lib-icon"><el-icon :size="20"><Collection /></el-icon></div>
-              <div class="lib-meta">
-                <div class="lib-name">{{ s.name }}</div>
-                <div class="lib-desc">{{ s.description || '—' }}</div>
-                <div class="lib-stats">
-                  <span>{{ s.page_count }} {{ t('knowledge.hub.pagesUnit') }}</span>
-                  <span v-if="categoryName(s.category_id)" class="lib-cat">{{ categoryName(s.category_id) }}</span>
-                </div>
-              </div>
-            </div>
-            <el-empty
-              v-if="!hubSpaces.length && !spacesLoading"
-              :description="t('knowledge.hub.emptyLibrary')"
-              :image-size="80"
-              class="lib-empty"
-            />
-          </div>
-        </template>
-
-        <!-- 当前库横幅（两视图通用） -->
-        <div v-if="selectedSpace" class="lib-banner">
-          <el-button :icon="ArrowLeft" size="small" text @click="closeSpace" />
-          <div class="lib-banner-icon"><el-icon :size="18"><Collection /></el-icon></div>
-          <div class="lib-banner-text">
-            <span class="lib-banner-name">{{ selectedSpace.name }}</span>
-            <span class="lib-banner-desc">{{ selectedSpace.description || t('knowledge.hub.pagesUnit') + ': ' + selectedSpace.page_count }}</span>
-          </div>
-        </div>
-
-        <!-- 按分类视图：分类内库 chips -->
-        <div v-if="viewMode === 'category' && catSpaces.length" class="lib-chips">
-          <span class="chips-label">{{ t('knowledge.hub.spacesInCat') }}</span>
-          <button
-            class="lib-chip"
-            :class="{ active: !selectedSpaceId }"
-            @click="selectedSpaceId = null"
-          >{{ t('knowledge.hub.allSpaces') }}</button>
-          <button
-            v-for="s in catSpaces"
-            :key="s.id"
-            class="lib-chip"
-            :class="{ active: selectedSpaceId === s.id }"
-            @click="selectedSpaceId = s.id"
-          >{{ s.name }}</button>
-        </div>
-
+      <el-col :xs="24" :md="17" :lg="18">
         <!-- 词条列表 -->
         <el-card shadow="never" class="pages-panel">
           <div v-loading="pagesLoading" class="pages-list">
@@ -130,8 +70,8 @@
                 <span class="row-conf">{{ Math.round((p.confidence ?? 0) * 100) }}%</span>
               </div>
               <div class="row-meta">
-                <span class="meta-lib">
-                  <el-icon><Collection /></el-icon>{{ p.space_name }}
+                <span v-if="categoryName(p.category_id)" class="meta-lib">
+                  {{ categoryName(p.category_id) }}
                 </span>
                 <span v-if="p.updated_at">{{ t('knowledge.hub.updated') }} {{ formatTime(p.updated_at) }}</span>
               </div>
@@ -167,7 +107,9 @@
     >
       <div v-if="pageDetail" class="drawer-body">
         <div class="drawer-meta">
-          <el-tag size="small" type="success" effect="plain" round>{{ pageDetail.space_name }}</el-tag>
+          <el-tag v-if="categoryName(pageDetail.category_id)" size="small" type="success" effect="plain" round>
+            {{ categoryName(pageDetail.category_id) }}
+          </el-tag>
           <span v-if="pageDetail.updated_at">{{ t('knowledge.hub.updated') }} {{ formatTime(pageDetail.updated_at) }}</span>
         </div>
         <div class="page-body" v-html="renderedBody" />
@@ -241,21 +183,16 @@ import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 
 import {
-  createKbCategory, deleteKbCategory, getKbCategories, getKbHubPage, getKbHubPages,
-  getKbHubSpaces, updateKbCategory,
+  createKbCategory, deleteKbCategory, getKbCategories, getKbHubPage, getKbHubPages, updateKbCategory,
 } from '@/api'
 import { useUserStore } from '@/stores/user'
 
 const { t } = useI18n()
 const userStore = useUserStore()
 
-const viewMode = ref<'category' | 'library'>('category')
 const searchText = ref('')
 const categories = ref<any[]>([])
-const hubSpaces = ref<any[]>([])
-const spacesLoading = ref(false)
 const selectedCatId = ref<number | null>(null)
-const selectedSpaceId = ref<number | null>(null)
 
 const pages = ref<any[]>([])
 const total = ref(0)
@@ -278,16 +215,6 @@ const rootCategories = computed(() => categories.value)
 const flatCategories = computed(() =>
   categories.value.flatMap((c) => [c, ...(c.children || [])].map(({ children, ...rest }: any) => rest)),
 )
-const selectedSpace = computed(() => hubSpaces.value.find((s) => s.id === selectedSpaceId.value))
-const catSpaces = computed(() => {
-  if (selectedCatId.value === null) return []
-  if (selectedCatId.value === 0) return hubSpaces.value.filter((s) => !s.category_id)
-  const ids = new Set<number>([selectedCatId.value])
-  const cat = categories.value.find((c) => c.id === selectedCatId.value)
-  ;(cat?.children || []).forEach((ch: any) => ids.add(ch.id))
-  return hubSpaces.value.filter((s) => ids.has(s.category_id))
-})
-const uncategorizedCount = computed(() => hubSpaces.value.filter((s) => !s.category_id).length)
 
 const renderedBody = computed(() => {
   if (!pageDetail.value?.body_md) return ''
@@ -298,9 +225,6 @@ const renderedBody = computed(() => {
   }
 })
 
-function totalPagesInCat(): number {
-  return hubSpaces.value.reduce((acc, s) => acc + (s.page_count ?? 0), 0)
-}
 
 function categoryName(categoryId: number | null): string {
   for (const c of categories.value) {
@@ -322,23 +246,12 @@ async function fetchCategories() {
   } catch { /* 拦截器已提示 */ }
 }
 
-async function fetchHubSpaces() {
-  spacesLoading.value = true
-  try {
-    const res: any = await getKbHubSpaces()
-    hubSpaces.value = res?.items ?? []
-  } catch { /* 拦截器已提示 */ } finally {
-    spacesLoading.value = false
-  }
-}
-
 async function fetchPages() {
   pagesLoading.value = true
   try {
     const params: any = { page: pageNum.value, page_size: pageSize }
     if (searchText.value.trim()) params.search = searchText.value.trim()
-    if (selectedSpaceId.value) params.space_id = selectedSpaceId.value
-    if (viewMode.value === 'category' && selectedCatId.value !== null) {
+    if (selectedCatId.value !== null) {
       params.category_id = selectedCatId.value
     }
     const res: any = await getKbHubPages(params)
@@ -351,19 +264,6 @@ async function fetchPages() {
 
 function selectCat(catId: number | null) {
   selectedCatId.value = catId
-  selectedSpaceId.value = null
-  pageNum.value = 1
-  fetchPages()
-}
-
-function openSpace(spaceId: number) {
-  selectedSpaceId.value = spaceId
-  pageNum.value = 1
-  fetchPages()
-}
-
-function closeSpace() {
-  selectedSpaceId.value = null
   pageNum.value = 1
   fetchPages()
 }
@@ -430,15 +330,14 @@ async function handleDeleteCat(row: any) {
     ElMessage.success(t('knowledge.hub.catDeleted'))
     if (selectedCatId.value === row.id) selectedCatId.value = null
     await fetchCategories()
-    await fetchHubSpaces()
     fetchPages()
   } catch { /* 拦截器已提示 */ }
 }
 
-watch(selectedSpaceId, () => { pageNum.value = 1 })
+watch(selectedCatId, () => { pageNum.value = 1 })
 
 onMounted(async () => {
-  await Promise.all([fetchCategories(), fetchHubSpaces()])
+  await fetchCategories()
   fetchPages()
 })
 </script>

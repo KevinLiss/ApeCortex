@@ -223,24 +223,46 @@
                   <el-switch v-model="enableTools" size="small" />
                 </div>
               </el-tooltip>
-              <!-- 知识库配置（ApeCortex） -->
+              <!-- 知识库配置（ApeCortex）：启用集合多选弹窗 -->
               <el-popover
                 v-model:visible="kbPrefsVisible"
                 placement="top-start"
-                :width="300"
+                :width="320"
                 trigger="click"
               >
                 <template #reference>
-                  <el-tooltip content="知识库召回配置（记忆/词条注入）" placement="top">
-                    <div class="tools-toggle" :class="{ 'kb-active': kbPrefs.auto_inject }">
+                  <el-tooltip content="知识库启用配置（知识中心与个人空间）" placement="top">
+                    <div class="tools-toggle" :class="{ 'kb-active': kbOn }">
                       <el-icon :size="14"><Collection /></el-icon>
                       <span>知识库</span>
-                      <el-badge v-if="kbPrefs.auto_inject" is-dot class="kb-dot-badge" />
+                      <el-badge v-if="kbOn" is-dot class="kb-dot-badge" />
                     </div>
                   </el-tooltip>
                 </template>
                 <div class="kb-prefs-panel">
-                  <div class="kb-prefs-title">知识库召回配置</div>
+                  <div class="kb-prefs-title">知识库启用配置</div>
+                  <div class="kb-prefs-row">
+                    <div>
+                      <div class="kb-prefs-label">知识中心</div>
+                      <div class="kb-prefs-tip">公共知识库（推送内容经 AI 甄选归类）</div>
+                    </div>
+                    <el-switch v-model="kbPrefs.include_hub" size="small" @change="saveKbPrefs" />
+                  </div>
+                  <div class="kb-prefs-row">
+                    <div>
+                      <div class="kb-prefs-label">我的知识空间</div>
+                      <div class="kb-prefs-tip">{{ kbPrefs.enabled_spaces.length ? `已启用 ${kbPrefs.enabled_spaces.length} 个` : '全部个人空间' }}</div>
+                    </div>
+                    <el-switch :model-value="kbSpacesAll" size="small" @change="onAllSpacesChange" />
+                  </div>
+                  <div v-if="!kbSpacesAll && kbSpaces.length" class="kb-spaces-list">
+                    <el-checkbox-group v-model="kbPrefs.enabled_spaces" @change="saveKbPrefs">
+                      <el-checkbox v-for="sp in kbSpaces" :key="sp.id" :value="sp.id">
+                        {{ sp.name }}
+                      </el-checkbox>
+                    </el-checkbox-group>
+                  </div>
+                  <div class="kb-prefs-divider"></div>
                   <div class="kb-prefs-row">
                     <span class="kb-prefs-label">记忆召回</span>
                     <el-switch v-model="kbPrefs.memory_enabled" size="small" @change="saveKbPrefs" />
@@ -251,28 +273,6 @@
                       <div class="kb-prefs-tip">每轮自动注入相关记忆与词条（消耗更多 token）</div>
                     </div>
                     <el-switch v-model="kbPrefs.auto_inject" size="small" @change="saveKbPrefs" />
-                  </div>
-                  <div class="kb-prefs-divider"></div>
-                  <div class="kb-prefs-row">
-                    <span class="kb-prefs-label">召回范围</span>
-                    <el-select v-model="kbPrefs.recall_scope" size="small" style="width: 130px" @change="saveKbPrefs">
-                      <el-option label="不启用" value="off" />
-                      <el-option label="个人全部" value="private" />
-                      <el-option label="指定空间" value="space" />
-                      <el-option label="公开库" value="public" />
-                    </el-select>
-                  </div>
-                  <div v-if="kbPrefs.recall_scope === 'space'" class="kb-prefs-row">
-                    <span class="kb-prefs-label">目标空间</span>
-                    <el-select
-                      v-model="kbPrefs.recall_space_id"
-                      size="small"
-                      style="width: 130px"
-                      :disabled="!kbSpaces.length"
-                      @change="saveKbPrefs"
-                    >
-                      <el-option v-for="s in kbSpaces" :key="s.id" :value="s.id" :label="s.name" />
-                    </el-select>
                   </div>
                   <div class="kb-prefs-tip kb-prefs-foot">
                     关闭自动注入时仍可用 kb_query 工具按需检索。
@@ -401,32 +401,42 @@ interface ChatSessionItem {
 const store = useAiChatStore()
 const router = useRouter()
 
-// 知识库偏好（ApeCortex）：插件后端持久化
+// 知识库偏好（ApeCortex）：启用集合模型（周期三）
 const kbPrefsVisible = ref(false)
 const kbPrefs = ref<any>({
-  recall_scope: 'private',
-  recall_space_id: 0,
+  include_hub: true,
+  enabled_spaces: [] as number[],
   memory_enabled: true,
   auto_inject: false,
 })
 const kbSpaces = ref<any[]>([])
 
+const kbOn = computed(() => kbPrefs.value.include_hub || kbPrefs.value.enabled_spaces.length > 0)
+const kbSpacesAll = computed(() => !kbPrefs.value.enabled_spaces.length)
+
 async function loadKbPrefs() {
   try {
     const res: any = await getKbChatPrefs()
     if (res) kbPrefs.value = { ...kbPrefs.value, ...res }
-  } catch { /* 插件未装/未授权：静默降级，入口仅作为普通配置 */ }
+  } catch { /* 插件未装/未授权：静默降级 */ }
   try {
     const sp: any = await getKbSpaces()
-    kbSpaces.value = (sp?.items ?? []).filter((s: any) => s.owned)
+    kbSpaces.value = sp?.items ?? []
   } catch { /* 同上 */ }
+}
+
+function onAllSpacesChange(val: boolean) {
+  // 开=全部个人空间（空列表语义）；关=进入勾选模式（先全选，用户再取消部分）
+  // 在勾选模式里取消所有勾选会回到空列表=全部语义，开关自动弹回「开」——自洽
+  kbPrefs.value.enabled_spaces = val ? [] : kbSpaces.value.map((s: any) => s.id)
+  saveKbPrefs()
 }
 
 async function saveKbPrefs() {
   try {
     await putKbChatPrefs({
-      recall_scope: kbPrefs.value.recall_scope,
-      recall_space_id: kbPrefs.value.recall_space_id || 0,
+      include_hub: kbPrefs.value.include_hub,
+      enabled_spaces: kbPrefs.value.enabled_spaces,
       memory_enabled: kbPrefs.value.memory_enabled,
       auto_inject: kbPrefs.value.auto_inject,
     })
@@ -1808,6 +1818,22 @@ html.dark .session-item.archived .session-item-title {
 .kb-prefs-divider {
   border-top: 1px dashed var(--el-border-color-lighter);
   margin: 4px 0 10px;
+}
+
+.kb-spaces-list {
+  max-height: 160px;
+  overflow-y: auto;
+  margin: -4px 0 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: var(--el-fill-color-light);
+}
+
+.kb-spaces-list :deep(.el-checkbox) {
+  display: flex;
+  width: 100%;
+  margin-right: 0;
+  height: 26px;
 }
 .kb-prefs-foot {
   margin-top: 4px;

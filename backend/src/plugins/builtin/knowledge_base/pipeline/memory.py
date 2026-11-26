@@ -17,7 +17,7 @@ import asyncio
 import hashlib
 import json
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from loguru import logger
 from sqlalchemy import func, select
@@ -328,7 +328,7 @@ async def extract_and_store(
     # 4. 入库：批内去重 + 库内去重（命中=强化）
     inserted = 0
     reinforced = 0
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     async with SessionLocal() as db:
         seen_hashes: set[str] = set()
         for item in items:
@@ -478,7 +478,7 @@ async def save_explicit(user_id: int, content: str, mem_type: str = "fact") -> d
             await db.commit()
             return {"ok": True, "action": "reinforced", "id": existing.id, "msg": "已存在，证据 +1"}
 
-        await _invalidate_conflicts(db, user_id, content, mem_type, datetime.now(timezone.utc))
+        await _invalidate_conflicts(db, user_id, content, mem_type, datetime.now(UTC))
 
         item = KbMemoryItem(
             user_id=user_id,
@@ -487,7 +487,7 @@ async def save_explicit(user_id: int, content: str, mem_type: str = "fact") -> d
             content_hash=chash,
             confidence=0.8,  # 显式保存起点置信度更高
             source_count=1,
-            valid_at=datetime.now(timezone.utc),
+            valid_at=datetime.now(UTC),
         )
         db.add(item)
         await db.commit()

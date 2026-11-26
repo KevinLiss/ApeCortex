@@ -12,7 +12,7 @@
 """
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.models.mixins import IDMixin, TimestampMixin
@@ -216,14 +216,19 @@ class KbWikiPage(IDMixin, TimestampMixin, PluginBase):
     - slug 空间内唯一；in/out_links 双向链接；source_refs 来源引用
     - version 乐观锁：用户可见内容变更才 +1（编辑冲突返回 409）
     - last_edit_source 四来源：pipeline/agent/user/revert
-    - status: candidate（晋升门槛未满足）→ draft → live → archived
-    - origin_* 晋升溯源：公开库副本指回私库原页与原作者（PR 合并心智）
+    - status: candidate（编译产出）→ draft → live → archived
+    - origin_* 推送溯源：知识中心副本指回原库原页与原作者
+    - category_id：知识中心词条的分类（周期三：AI 甄选归类；空=未分类）
     """
 
     __tablename__ = "kb_wiki_page"
 
     space_id: Mapped[int] = mapped_column(
         Integer, nullable=False, index=True, comment="所属空间"
+    )
+    category_id: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, index=True,
+        comment="知识中心词条分类（AI 甄选归类；空=未分类）",
     )
     slug: Mapped[str] = mapped_column(
         String(200), nullable=False, comment="URL 友好标识（空间内唯一）"
@@ -293,50 +298,6 @@ class KbWikiRevision(IDMixin, TimestampMixin, PluginBase):
         return f"<KbWikiRevision page={self.page_id} v{self.version}>"
 
 
-class KbPromotion(IDMixin, TimestampMixin, PluginBase):
-    """晋升申请单（PR 心智模型，规划 10.3 节）。
-
-    提交时冻结内容快照 snapshot_md——审核期间私库继续编辑不影响审核对象；
-    批准后在公开库生成独立副本（published_page_id），私库原件不动（双轨）。
-    """
-
-    __tablename__ = "kb_promotion"
-
-    page_id: Mapped[int] = mapped_column(
-        Integer, nullable=False, index=True, comment="私库源词条ID"
-    )
-    source_space_id: Mapped[int] = mapped_column(Integer, nullable=False, comment="源空间")
-    target_space_id: Mapped[int] = mapped_column(
-        Integer, nullable=False, index=True, comment="目标公开空间"
-    )
-    status: Mapped[str] = mapped_column(
-        String(20), nullable=False, default="draft", index=True,
-        comment="draft/submitted/approved/rejected/withdrawn",
-    )
-    snapshot_md: Mapped[str] = mapped_column(Text, nullable=False, comment="提交时正文快照（冻结）")
-    snapshot_slug: Mapped[str] = mapped_column(String(200), nullable=False, comment="快照 slug")
-    snapshot_title: Mapped[str] = mapped_column(String(200), nullable=False, comment="快照标题")
-    submit_note: Mapped[str] = mapped_column(
-        String(500), nullable=False, default="", comment="提交说明"
-    )
-    submitted_by: Mapped[int] = mapped_column(
-        Integer, nullable=False, index=True, comment="提交人（=源页 owner）"
-    )
-    reviewed_by: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="审核人")
-    review_comment: Mapped[str] = mapped_column(
-        String(500), nullable=False, default="", comment="审核意见"
-    )
-    published_page_id: Mapped[int | None] = mapped_column(
-        Integer, nullable=True, comment="批准后公开库生成的页ID"
-    )
-    id_hash: Mapped[str] = mapped_column(
-        String(64), nullable=False, index=True, comment="内容寻址哈希（同内容重复提交合并）"
-    )
-
-    def __repr__(self) -> str:
-        return f"<KbPromotion {self.id} page={self.page_id} {self.status}>"
-
-
 class KbJob(IDMixin, TimestampMixin, PluginBase):
     """任务中枢（仿宿主 ChatRun 模式：状态机 + 增量结果落库）。
 
@@ -382,26 +343,6 @@ class KbJob(IDMixin, TimestampMixin, PluginBase):
 
     def __repr__(self) -> str:
         return f"<KbJob {self.id} {self.job_type} {self.status}>"
-
-
-class KbSpaceMember(IDMixin, TimestampMixin, PluginBase):
-    """共享空间成员（M3）：reader 只读，writer 可写入（owner 隐式拥有全部权限，不占表行）。"""
-
-    __tablename__ = "kb_space_member"
-    __table_args__ = (UniqueConstraint("space_id", "user_id", name="uq_kb_space_member"),)
-
-    space_id: Mapped[int] = mapped_column(
-        Integer, nullable=False, index=True, comment="空间 ID"
-    )
-    user_id: Mapped[int] = mapped_column(
-        Integer, nullable=False, index=True, comment="成员用户 ID"
-    )
-    role: Mapped[str] = mapped_column(
-        String(20), nullable=False, default="reader", comment="reader=只读 writer=可写"
-    )
-
-    def __repr__(self) -> str:
-        return f"<KbSpaceMember space={self.space_id} user={self.user_id} role={self.role}>"
 
 
 class KbPublicKey(IDMixin, TimestampMixin, PluginBase):
@@ -455,6 +396,9 @@ class KbPublicSubmission(IDMixin, TimestampMixin, PluginBase):
     source_doc_id: Mapped[int] = mapped_column(
         Integer, nullable=False, comment="源文档 ID（可能已被删，内容以快照为准）"
     )
+    source_page_id: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, comment="源词条 ID（词条推送时非 0）"
+    )
     doc_title: Mapped[str] = mapped_column(String(200), nullable=False, comment="文档标题快照")
     doc_content: Mapped[str] = mapped_column(Text, nullable=False, comment="文档内容快照（冻结）")
     content_hash: Mapped[str] = mapped_column(
@@ -499,6 +443,15 @@ class KbPublicSubmission(IDMixin, TimestampMixin, PluginBase):
     )
     disposed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, comment="处置时间"
+    )
+    check_comment: Mapped[str] = mapped_column(
+        String(500), nullable=False, default="", comment="复查登记意见（留痕不改结果）"
+    )
+    checked_by: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, comment="复查人"
+    )
+    checked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, comment="复查时间"
     )
 
     def __repr__(self) -> str:

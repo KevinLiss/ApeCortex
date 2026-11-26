@@ -1,25 +1,25 @@
-"""聊天知识库偏好与自动注入（N3）。
+"""聊天知识库偏好与自动注入（周期三：启用集合模型）。
 
-偏好三项（存 KbSetting，user 维度，键 chat_*）：
-- chat_recall_scope:  off / private / space / public（召回范围；默认 private）
-- chat_recall_space_id: scope=space 时的目标空间
-- chat_memory_enabled: 对话中是否注入记忆与画像（默认开）
-- chat_auto_inject:   每轮自动注入相关记忆/词条（默认关；token 成本更高）
+偏好（存 KbSetting，user 维度）：
+- chat_include_hub:    启用知识中心公共知识库（默认开）
+- chat_enabled_spaces: 启用的个人空间 id 列表（JSON 数组，默认空=全部个人空间）
+- chat_memory_enabled: 注入记忆与画像（默认开）
+- chat_auto_inject:    每轮自动注入（默认关；token 成本更高）
 
-自动注入机制（零宿主源码侵入）：
-- 插件 on_load 时对 ``src.ai.runner._build_context`` 做运行时包装：
-  原函数产出 messages 后，若该用户开启 auto_inject，则把检索到的
-  相关记忆/词条组装为一条 system 消息插入头部。检索为纯本地关键词
-  匹配，零 LLM 调用（成本纪律）；插件卸载时还原原函数。
+检索语义：include_hub=False 且 enabled_spaces=[] 时视为「未启用」，不注入不限定；
+kb_query 同样按该集合过滤（聊天页配置直接影响工具召回范围）。
+
+自动注入机制：运行时包装宿主 runner._build_context（零宿主源码侵入），
+检索为纯本地关键词匹配，零 LLM 调用（成本纪律）；插件卸载时还原。
 """
+import json
 
 from loguru import logger
 from sqlalchemy import select
 
 from src.db import SessionLocal
 
-_PREF_KEYS = ("chat_recall_scope", "chat_recall_space_id", "chat_memory_enabled", "chat_auto_inject")
-_SCOPES = ("off", "private", "space", "public")
+_PREF_KEYS = ("chat_include_hub", "chat_enabled_spaces", "chat_memory_enabled", "chat_auto_inject")
 
 _INJECT_MAX_ITEMS = 6          # 注入的记忆/词条条数上限
 _INJECT_MAX_CHARS = 2600       # 注入文本总长上限（token 护栏）
@@ -37,10 +37,16 @@ async def get_chat_prefs(user_id: int) -> dict:
             )
         )).scalars().all())
     values = {r.key: r.value for r in rows}
-    scope = values.get("chat_recall_scope", "private")
+    try:
+        spaces = json.loads(values.get("chat_enabled_spaces") or "[]")
+        if not isinstance(spaces, list):
+            spaces = []
+        spaces = [int(x) for x in spaces if str(x).isdigit()][:50]
+    except (json.JSONDecodeError, ValueError, TypeError):
+        spaces = []
     return {
-        "recall_scope": scope if scope in _SCOPES else "private",
-        "recall_space_id": int(values.get("chat_recall_space_id") or 0),
+        "include_hub": values.get("chat_include_hub", "1") == "1",
+        "enabled_spaces": spaces,
         "memory_enabled": values.get("chat_memory_enabled", "1") == "1",
         "auto_inject": values.get("chat_auto_inject", "0") == "1",
     }
@@ -50,16 +56,17 @@ async def set_chat_prefs(user_id: int, prefs: dict) -> dict:
     """保存偏好（幂等 upsert）。"""
     from src.plugins.builtin.knowledge_base.models import KbSetting
 
-    scope = str(prefs.get("recall_scope") or "private")
-    if scope not in _SCOPES:
-        return {"ok": False, "msg": "召回范围仅支持 off / private / space / public"}
-    space_id = int(prefs.get("recall_space_id") or 0)
+    include_hub = bool(prefs.get("include_hub", True))
+    spaces = prefs.get("enabled_spaces") or []
+    if not isinstance(spaces, list):
+        spaces = []
+    spaces = [int(x) for x in spaces if str(x).isdigit()][:50]
     memory_enabled = bool(prefs.get("memory_enabled", True))
     auto_inject = bool(prefs.get("auto_inject", False))
 
     new_values = {
-        "chat_recall_scope": scope,
-        "chat_recall_space_id": str(space_id),
+        "chat_include_hub": "1" if include_hub else "0",
+        "chat_enabled_spaces": json.dumps(spaces),
         "chat_memory_enabled": "1" if memory_enabled else "0",
         "chat_auto_inject": "1" if auto_inject else "0",
     }
@@ -82,25 +89,39 @@ async def set_chat_prefs(user_id: int, prefs: dict) -> dict:
     return {"ok": True}
 
 
+def _is_enabled(prefs: dict) -> bool:
+    """启用判定：开了 hub 或显式选了空间（空列表=未限定但 hub 关=未启用）。"""
+    return prefs["include_hub"] or bool(prefs["enabled_spaces"])
+
+
+def _space_filter(prefs: dict) -> list[int] | None:
+    """space_ids 传参：None=全部个人空间；[] 是不可能的（此时未启用）。"""
+    if prefs["enabled_spaces"]:
+        return prefs["enabled_spaces"]
+    return None  # 未显式选 = 全部自己的空间
+
+
 # ---------------------------------------------------------------- 自动注入
 
 async def build_context_injection(user_id: int, question: str) -> str | None:
     """按偏好组装一条 system 注入文本（纯本地检索，零 LLM 调用）。无内容返回 None。"""
     prefs = await get_chat_prefs(user_id)
-    if not prefs["auto_inject"] or prefs["recall_scope"] == "off":
+    if not prefs["auto_inject"] or not _is_enabled(prefs):
         return None
 
     from src.plugins.builtin.knowledge_base.pipeline.retrieval import search_all
 
     limit = _INJECT_MAX_ITEMS
     try:
-        result = await search_all(user_id, question, limit)
+        result = await search_all(
+            user_id, question, limit,
+            space_ids=_space_filter(prefs),
+            include_hub=prefs["include_hub"],
+        )
     except Exception as exc:  # noqa: BLE001 — 注入失败绝不影响聊天
         logger.warning(f"[KnowledgeBase] 自动注入检索失败: {exc}")
         return None
 
-    # 按召回范围过滤通道
-    scope = prefs["recall_scope"]
     sections: list[str] = []
 
     if prefs["memory_enabled"]:
@@ -112,18 +133,7 @@ async def build_context_injection(user_id: int, question: str) -> str | None:
             lines = [f"- {m.get('content', '')}" for m in memories[:limit]]
             sections.append("## 用户长期记忆（相关）\n" + "\n".join(lines))
 
-    # 词条通道：scope 决定取哪些（space 范围横跨三通道按空间过滤）
-    if scope == "private":
-        pages = result.get("private_pages") or []
-    elif scope == "public":
-        pages = result.get("public_pages") or []
-    elif scope == "space":
-        pages = [
-            p for p in (result.get("private_pages") or []) + (result.get("shared_pages") or [])
-            if (p.get("space") or {}).get("id") == prefs["recall_space_id"]
-        ]
-    else:
-        pages = []
+    pages = (result.get("private_pages") or []) + (result.get("hub_pages") or [])
     if pages:
         lines = [
             f"- {p.get('title', '')}：{p.get('snippet', '')[:160]}"

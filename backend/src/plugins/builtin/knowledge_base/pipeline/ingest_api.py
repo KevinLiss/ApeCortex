@@ -1,8 +1,9 @@
 """摄入 API（P1）：空间管理 + 文档入库 + 编译触发。
 
-- 私有空间写入：仅 owner
-- 共享空间（M3）：成员可读，writer 可写，owner 拥有全部权限
-- 公开库写入：仅经晋升流或空间 owner（本模块不提供普通用户直写公开库的路径）
+周期三简化（2026-11-26 用户决策）：
+- 空间无类型概念：所有空间都是个人知识库，仅 owner 可读写
+- 知识中心（hub）是唯一公共库，由 submission 管线写入（见 pipeline/submission.py）
+- M3 的共享空间/成员管理已下线
 """
 import hashlib
 
@@ -13,39 +14,21 @@ from src.db import SessionLocal
 
 
 async def get_space_role(user_id: int, space_id: int) -> str | None:
-    """当前用户在该空间的角色：owner / writer / reader / None（public 空间的非成员视为 reader）。"""
-    from src.plugins.builtin.knowledge_base.models import KbSpace, KbSpaceMember
+    """当前用户在该空间的角色：owner / None（空间为个人库，仅 owner 可访问）。"""
+    from src.plugins.builtin.knowledge_base.models import KbSpace
 
     async with SessionLocal() as db:
         space = await db.get(KbSpace, space_id)
         if space is None or space.status != "active":
             return None
-        if space.owner_user_id == user_id:
-            return "owner"
-        member = (
-            await db.execute(
-                select(KbSpaceMember).where(
-                    KbSpaceMember.space_id == space_id,
-                    KbSpaceMember.user_id == user_id,
-                )
-            )
-        ).scalars().first()
-        if member is not None:
-            return "writer" if member.role == "writer" else "reader"
-        return "reader" if space.visibility == "public" else None
+        return "owner" if space.owner_user_id == user_id else None
 
 
 async def ensure_space_access(user_id: int, space_id: int, need_write: bool = False) -> tuple[bool, str]:
-    """校验空间访问权限（M3 统一入口）。
-
-    - 读：owner / 成员 / public 空间任意登录用户
-    - 写：owner / writer 成员（public 空间同样仅 owner 或 writer）
-    """
+    """校验空间访问权限（周期三：个人库，读写均仅 owner）。"""
     role = await get_space_role(user_id, space_id)
     if role is None:
-        return False, "无权访问该空间（非成员）"
-    if need_write and role == "reader":
-        return False, "仅空间所有者或 writer 成员可写入"
+        return False, "无权访问该空间（非所有者）"
     return True, "ok"
 
 
@@ -164,19 +147,17 @@ async def ingest_doc(
     return result
 
 
-async def create_space(user_id: int, name: str, description: str = "", visibility: str = "private") -> dict:
-    """创建空间。private 人人可建；public 由路由层做维护者鉴权后传入。"""
+async def create_space(user_id: int, name: str, description: str = "", visibility: str = "") -> dict:
+    """创建空间（周期三：个人知识库，无类型概念；visibility 参数兼容旧调用并被忽略）。"""
     from src.plugins.builtin.knowledge_base.models import KbSpace
 
-    if visibility not in ("private", "shared", "public"):
-        return {"ok": False, "msg": "可见性仅支持 private / shared / public"}
     name = name.strip()[:100]
     if len(name) < 1:
         return {"ok": False, "msg": "空间名不能为空"}
     async with SessionLocal() as db:
         space = KbSpace(
             owner_user_id=user_id, name=name,
-            description=(description or "")[:2000], visibility=visibility,
+            description=(description or "")[:2000], visibility="private",
         )
         db.add(space)
         await db.commit()
@@ -185,36 +166,22 @@ async def create_space(user_id: int, name: str, description: str = "", visibilit
 
 
 async def list_spaces(user_id: int) -> list[dict]:
-    """用户视角的空间列表：自己的全部 + 自己参与的共享空间 + 公开空间。"""
-    from src.plugins.builtin.knowledge_base.models import KbSpace, KbSpaceMember
+    """用户视角的空间列表（周期三：个人知识库，只返回自己的空间）。"""
+    from src.plugins.builtin.knowledge_base.models import KbSpace
 
     async with SessionLocal() as db:
         rows = list((
             await db.execute(
                 select(KbSpace)
-                .where(KbSpace.status == "active")
-                .order_by(KbSpace.visibility.desc(), KbSpace.id.asc())
+                .where(KbSpace.owner_user_id == user_id, KbSpace.status == "active")
+                .order_by(KbSpace.id.asc())
             )
         ).scalars().all())
-        memberships = {
-            m.space_id: m.role
-            for m in (
-                await db.execute(
-                    select(KbSpaceMember).where(KbSpaceMember.user_id == user_id)
-                )
-            ).scalars().all()
-        }
-    out = []
-    for s in rows:
-        owned = s.owner_user_id == user_id
-        role = "owner" if owned else memberships.get(s.id)
-        if not owned and s.visibility == "public":
-            role = role or "reader"
-        elif not owned and role is None:
-            continue  # 私有/共享：非成员不可见
-        out.append({
+    return [
+        {
             "id": s.id, "name": s.name, "description": s.description,
             "visibility": s.visibility, "page_count": s.page_count,
-            "owned": owned, "my_role": role,
-        })
-    return out
+            "owned": True, "my_role": "owner",
+        }
+        for s in rows
+    ]

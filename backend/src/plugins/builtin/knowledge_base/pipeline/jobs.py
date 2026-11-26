@@ -7,7 +7,7 @@
 """
 import asyncio
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from loguru import logger
@@ -33,7 +33,7 @@ async def enqueue_job(
     成本护栏（M5）：``kb_setting.daily_job_limit``（user_id=0，0=不限）限制单用户当日任务数，
     超限抛 ``RuntimeError``（调用方转 429/友好提示）。
     """
-    from datetime import datetime, time, timezone
+    from datetime import datetime
 
     from sqlalchemy import func
 
@@ -50,7 +50,7 @@ async def enqueue_job(
         except ValueError:
             daily_limit = 0
         if daily_limit > 0:
-            day_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+            day_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
             used = (await db.execute(
                 select(func.count()).select_from(KbJob).where(
                     KbJob.user_id == user_id,
@@ -113,7 +113,7 @@ async def _claim_next(user_id: int) -> int | None:
         if row is None:
             return None
         row.status = "running"
-        row.started_at = datetime.now(timezone.utc)
+        row.started_at = datetime.now(UTC)
         await db.commit()
         return row.id
 
@@ -146,7 +146,7 @@ async def _execute(job_id: int) -> None:
             from src.plugins.builtin.knowledge_base.pipeline.compiler import compile_space
             await _update_job(job_id, step="compiling", progress=10)
             doc_ids = payload.get("doc_ids")
-            result = await compile_space(space_id, doc_ids)
+            result = await compile_space(space_id, doc_ids, category_id=payload.get("category_id"))
             if result.get("llm_calls"):
                 await _bump_llm_calls(job_id, result["llm_calls"])
         elif job_type == "research":
@@ -182,13 +182,13 @@ async def _execute(job_id: int) -> None:
         await _update_job(
             job_id, status="done", progress=100, step="",
             result=json.dumps(result, ensure_ascii=False),
-            finished_at=datetime.now(timezone.utc),
+            finished_at=datetime.now(UTC),
         )
         logger.info(f"[KB] job {job_id} done: {result}")
     except Exception as exc:  # noqa: BLE001
         await _update_job(
             job_id, status="failed", error=str(exc)[:2000],
-            finished_at=datetime.now(timezone.utc),
+            finished_at=datetime.now(UTC),
         )
         logger.error(f"[KB] job {job_id} failed: {exc}")
 
@@ -221,7 +221,7 @@ async def recover_orphan_jobs() -> int:
             .values(
                 status="failed",
                 error="服务重启，任务中断，请重试",
-                finished_at=datetime.now(timezone.utc),
+                finished_at=datetime.now(UTC),
             )
         )
         await db.commit()
@@ -233,8 +233,9 @@ async def recover_orphan_jobs() -> int:
 
 async def list_jobs(user_id: int, page: int = 1, page_size: int = 20) -> dict:
     """用户任务列表（页面轮询）。"""
-    from src.plugins.builtin.knowledge_base.models import KbJob
     from sqlalchemy import func
+
+    from src.plugins.builtin.knowledge_base.models import KbJob
 
     async with SessionLocal() as db:
         cond = KbJob.user_id == user_id

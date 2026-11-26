@@ -1,19 +1,22 @@
-"""公开库只读出口（M3）：外部 AI / 站点以只读凭证访问已发布的公开词条。
+"""知识中心只读出口（周期三）：外部 AI / 站点以只读凭证访问知识中心已发布词条。
 
 .. important:: 边界
    - 只读：无任何写入端点。
-   - 只见 ``visibility == 'public'`` 且 ``status == 'live'`` 的词条；
-     draft / candidate / archived、私有/共享空间内容在此路由的 SQL 中不存在读取路径。
+   - 只见知识中心（hub 单例）且 ``status == 'live'`` 的词条；
+     draft / candidate / archived、个人空间内容在此路由的 SQL 中不存在读取路径。
    - 鉴权：``X-Kb-Key`` 只读凭证（sha256 存库，明文仅创建时返回一次）。
    - 限流：每凭证 60 秒 10 次（进程内窗口，多 worker 为尽力而为）。
    - 审计：累计请求数与最近使用时间写回凭证行，异常只记日志不抛。
 """
 import hashlib
 import time
+from datetime import UTC
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from loguru import logger
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db import get_db
 
@@ -53,33 +56,35 @@ async def _resolve_key(db, raw: str | None):
 
 
 async def _touch_key(db, row) -> None:
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     row.request_count += 1
-    row.last_used_at = datetime.now(timezone.utc)
+    row.last_used_at = datetime.now(UTC)
     await db.commit()
 
 
 @router.get("/search")
 async def public_search(
+    db: Annotated[AsyncSession, Depends(get_db)],
     q: str = Query(default="", max_length=100),
     limit: int = Query(default=5, ge=1, le=20),
     x_kb_key: str | None = Header(default=None, alias="X-Kb-Key"),
-    db=Depends(get_db),
 ):
-    """按关键词检索公开库 live 词条（零命中不返回）。"""
+    """按关键词检索知识中心 live 词条（零命中不返回）。"""
     from src.plugins.builtin.knowledge_base.models import KbSpace, KbWikiPage
+    from src.plugins.builtin.knowledge_base.pipeline.hub import get_hub_space_id
     from src.plugins.builtin.knowledge_base.pipeline.retrieval import _scored_hit, _split_words
 
     key_row = await _resolve_key(db, x_kb_key)
     if not _rate_ok(key_row.id):
         raise HTTPException(status_code=429, detail="请求过于频繁（每凭证 10 次/分钟）")
 
+    hub_id = await get_hub_space_id()
     rows = list((await db.execute(
         select(KbWikiPage, KbSpace.name)
         .join(KbSpace, KbWikiPage.space_id == KbSpace.id)
         .where(
-            KbSpace.visibility == "public",
+            KbWikiPage.space_id == hub_id,
             KbSpace.status == "active",
             KbWikiPage.status == "live",
             KbWikiPage.is_deleted == False,  # noqa: E712
@@ -120,22 +125,24 @@ async def public_search(
 
 @router.get("/pages/{slug}")
 async def public_page(
+    db: Annotated[AsyncSession, Depends(get_db)],
     slug: str,
     x_kb_key: str | None = Header(default=None, alias="X-Kb-Key"),
-    db=Depends(get_db),
 ):
-    """按 slug 读取单篇公开 live 词条全文。"""
+    """按 slug 读取知识中心单篇 live 词条全文。"""
     from src.plugins.builtin.knowledge_base.models import KbSpace, KbWikiPage
+    from src.plugins.builtin.knowledge_base.pipeline.hub import get_hub_space_id
 
     key_row = await _resolve_key(db, x_kb_key)
     if not _rate_ok(key_row.id):
         raise HTTPException(status_code=429, detail="请求过于频繁（每凭证 10 次/分钟）")
 
+    hub_id = await get_hub_space_id()
     row = (await db.execute(
         select(KbWikiPage, KbSpace.name)
         .join(KbSpace, KbWikiPage.space_id == KbSpace.id)
         .where(
-            KbSpace.visibility == "public",
+            KbWikiPage.space_id == hub_id,
             KbSpace.status == "active",
             KbWikiPage.status == "live",
             KbWikiPage.is_deleted == False,  # noqa: E712

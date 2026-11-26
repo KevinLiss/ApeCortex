@@ -99,72 +99,19 @@
       </template>
     </el-dialog>
 
-    <!-- 推送公开库弹窗 -->
-    <el-dialog v-model="pushVisible" :title="t('knowledge.push.pushTitle')" width="500px">
-      <el-form label-position="top">
-        <el-form-item :label="t('knowledge.push.pushTarget')">
-          <div class="push-target-row">
-            <el-select
-              v-model="pushTarget"
-              style="flex: 1"
-              clearable
-              :placeholder="t('knowledge.push.pushTargetPlaceholder')"
-            >
-              <el-option v-for="s in pushTargets" :key="s.id" :value="s.id" :label="s.name" />
-            </el-select>
-            <el-button
-              v-if="canCreatePublic"
-              :icon="Plus"
-              @click="pushCreateVisible = true"
-            >{{ t('knowledge.push.createTarget') }}</el-button>
-          </div>
-          <!-- 空态引导：无公开库时给明确出路 -->
-          <el-alert
-            v-if="!pushTargets.length && !canCreatePublic"
-            type="warning"
-            :closable="false"
-            show-icon
-            class="push-empty-alert"
-            :title="t('knowledge.push.noTargetHint')"
-          />
-        </el-form-item>
-        <p class="push-tip">{{ t('knowledge.push.pushFlowTip') }}</p>
-      </el-form>
+    <!-- 推送知识中心确认弹窗 -->
+    <el-dialog v-model="pushVisible" :title="t('knowledge.push.pushTitle')" width="460px">
+      <el-alert type="info" :closable="false" show-icon class="push-flow-alert"
+        :title="t('knowledge.push.pushFlowTitle')" :description="t('knowledge.push.pushFlowTip')" />
+      <p class="push-doc-title" :class="{ hint: !pushDoc }">{{ pushDoc?.title || t('knowledge.push.pushPickHint') }}</p>
       <template #footer>
         <el-button @click="pushVisible = false">{{ t('common.action.cancel') }}</el-button>
-        <el-button type="primary" :loading="pushing" :disabled="!pushDoc || !pushTarget" @click="handlePush">
+        <el-button type="primary" :loading="pushing" :disabled="!pushDoc" @click="handlePush">
           {{ t('knowledge.push.pushSubmit') }}
         </el-button>
       </template>
     </el-dialog>
 
-    <!-- 新建公开库弹窗（推送弹窗内快捷入口） -->
-    <el-dialog
-      v-model="pushCreateVisible"
-      :title="t('knowledge.push.createTargetTitle')"
-      width="420px"
-      append-to-body
-    >
-      <el-form label-position="top">
-        <el-form-item :label="t('knowledge.spaces.name')">
-          <el-input v-model="newPublicName" maxlength="100" :placeholder="t('knowledge.spaces.namePlaceholder')" />
-        </el-form-item>
-        <el-form-item :label="t('knowledge.spaces.desc')">
-          <el-input v-model="newPublicDesc" type="textarea" :rows="2" maxlength="500" />
-        </el-form-item>
-        <el-form-item :label="t('knowledge.hub.catName')">
-          <el-select v-model="newPublicCategory" style="width: 100%" clearable>
-            <el-option v-for="c in flatCategories" :key="c.id" :value="c.id" :label="(c.parent_id ? '└ ' : '') + c.name" />
-          </el-select>
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="pushCreateVisible = false">{{ t('common.action.cancel') }}</el-button>
-        <el-button type="primary" :loading="creatingPublic" @click="handleCreatePublic">
-          {{ t('knowledge.push.createTargetConfirm') }}
-        </el-button>
-      </template>
-    </el-dialog>
 
     <!-- 文档查看抽屉 -->
     <el-drawer v-model="docDrawerVisible" :title="docDetail?.title || ''" size="52%" :z-index="2000" class="kb-doc-drawer">
@@ -201,20 +148,18 @@
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { CircleCheck, Document, Download, Plus, Promotion, Upload } from '@element-plus/icons-vue'
+import { CircleCheck, Document, Download, Promotion, Upload } from '@element-plus/icons-vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 
 import {
-  compileKbDoc, createKbPushTarget, deleteKbDoc, downloadKbDoc, getKbCategories, getKbPushTargets, getKbSpaceDoc, getKbSpaceDocs, submitKbPublic, uploadKbDoc, uploadKbDocFile,
+  compileKbDoc, deleteKbDoc, downloadKbDoc, getKbSpaceDoc, getKbSpaceDocs, submitKbDocPublic, uploadKbDoc, uploadKbDocFile,
 } from '@/api'
-import { useUserStore } from '@/stores/user'
 
 const props = defineProps<{ spaceId: number; canWrite: boolean }>()
 const emit = defineEmits<{ (e: 'refresh'): void; (e: 'goto-page', pageId: number): void }>()
 
 const { t } = useI18n()
-const userStore = useUserStore()
 
 const docs = ref<any[]>([])
 const loading = ref(false)
@@ -228,21 +173,9 @@ const docDetail = ref<any>(null)
 
 const pushVisible = ref(false)
 const pushDoc = ref<any>(null)
-const pushTarget = ref<number | null>(null)
 const pushing = ref(false)
-const pushTargets = ref<any[]>([])
-const canCreatePublic = ref(false)
-const pushCreateVisible = ref(false)
-const newPublicName = ref('')
-const newPublicDesc = ref('')
-const newPublicCategory = ref<number | null>(null)
-const creatingPublic = ref(false)
-const categories = ref<any[]>([])
-const canPush = computed(() => userStore.hasPermission('knowledge_base:submission:submit'))
+const canPush = true // 提交人本人（个人空间 owner）即有推送入口；按钮仅受 canWrite 控制
 const totalChars = computed(() => docs.value.reduce((acc, d) => acc + (d.char_count || 0), 0))
-const flatCategories = computed(() =>
-  categories.value.flatMap((c) => [c, ...(c.children || [])].map(({ children, ...rest }: any) => rest)),
-)
 
 const renderedDoc = computed(() => {
   if (!docDetail.value?.content) return ''
@@ -282,42 +215,7 @@ function triggerUpload() {
 
 async function openPush(row: any) {
   pushDoc.value = row
-  pushTarget.value = null
-  try {
-    const res: any = await getKbPushTargets()
-    pushTargets.value = res?.items ?? []
-    canCreatePublic.value = !!res?.can_create_public
-    pushTarget.value = pushTargets.value[0]?.id ?? null
-    if (canCreatePublic.value) {
-      const cats: any = await getKbCategories()
-      categories.value = cats?.items ?? []
-    }
-  } catch { /* 拦截器已提示 */ }
   pushVisible.value = true
-}
-
-async function handleCreatePublic() {
-  if (!newPublicName.value.trim()) {
-    ElMessage.warning(t('knowledge.spaces.namePlaceholder'))
-    return
-  }
-  creatingPublic.value = true
-  try {
-    const res: any = await createKbPushTarget({
-      name: newPublicName.value.trim(),
-      description: newPublicDesc.value.trim(),
-      category_id: newPublicCategory.value ?? undefined,
-    })
-    ElMessage.success(t('knowledge.push.targetCreated'))
-    pushCreateVisible.value = false
-    newPublicName.value = ''
-    newPublicDesc.value = ''
-    newPublicCategory.value = null
-    pushTargets.value = [...pushTargets.value, res]
-    pushTarget.value = res.id
-  } catch { /* 拦截器已提示 */ } finally {
-    creatingPublic.value = false
-  }
 }
 
 async function handleDownload(row: any) {
@@ -340,12 +238,10 @@ async function handlePush() {
   if (!pushDoc.value) return
   pushing.value = true
   try {
-    await submitKbPublic(props.spaceId, pushDoc.value.id, {
-      target_space_id: pushTarget.value ?? undefined,
-    })
+    await submitKbDocPublic(props.spaceId, pushDoc.value.id)
     ElMessage.success(t('knowledge.push.submitted'))
     pushVisible.value = false
-  } catch (e: any) { /* 拦截器已提示（含重复推送幂等文案） */ } finally {
+  } catch { /* 拦截器已提示（含重复推送幂等文案） */ } finally {
     pushing.value = false
   }
 }
@@ -676,16 +572,20 @@ defineExpose({ refresh: fetchDocs })
   margin: 8px 0;
 }
 
-.push-target-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
+.push-flow-alert {
+  margin-bottom: 12px;
 }
 
-.push-empty-alert {
-  width: 100%;
-  margin-top: 8px;
+.push-doc-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  word-break: break-all;
+}
+
+.push-doc-title.hint {
+  font-weight: 400;
+  color: var(--el-text-color-secondary);
 }
 
 .push-empty {

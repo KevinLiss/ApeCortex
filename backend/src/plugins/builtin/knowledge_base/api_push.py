@@ -1,9 +1,9 @@
-"""公开库推送 API（N2）——提交推送单 / 审核 / 违规处置。
+"""推送 API（周期三）——推送知识中心 + 留痕复查 + 违规处置。
 
 .. pattern:: 与 api_wiki 同纪律
-   - 提交：写权限（owner/writer）
-   - 审核/处置：knowledge_base:submission:review / :dispose 权限（维护者）
-   - 自审制衡：不能审核自己提交的推送（管线层校验）
+   - 提交：空间 owner（个人库）
+   - 复查登记/违规处置：knowledge_base:submission:review / :dispose 权限（维护者）
+   - 无审批环节（用户决策：AI 甄选过的直接入库，留痕可复查）
 """
 from typing import Annotated
 
@@ -19,29 +19,37 @@ from src.models import User
 from src.plugins.builtin.knowledge_base.models import (
     KbCategory,
     KbPublicSubmission,
-    KbSpace,
 )
 from src.plugins.builtin.knowledge_base.pipeline import submission as push
 
-router = APIRouter(prefix="/knowledge-base", tags=["ApeCortex 公开库推送"])
+router = APIRouter(prefix="/knowledge-base", tags=["ApeCortex 推送"])
 
 
 # ---------------------------------------------------------------- 提交
 
 @router.post("/spaces/{space_id}/docs/{doc_id}/submit-public")
-async def submit_public(
+async def submit_doc_public(
     space_id: int,
     doc_id: int,
-    body: dict,
     user: Annotated[User, Depends(get_current_user)],
     _perm: Annotated[User, Depends(_require_perm("knowledge_base:submission:submit"))],
 ):
-    """把一份文档推送到公开库审核流（内容快照冻结 → AI 分析 → 人审）。"""
-    target_space_id = body.get("target_space_id")
-    result = await push.submit_public_doc(
-        user.id, space_id, doc_id,
-        target_space_id=int(target_space_id) if target_space_id else None,
-    )
+    """把一份文档推送到知识中心（AI 甄选 → 无违规自动入库）。"""
+    result = await push.submit_public_content(user.id, space_id, doc_id=doc_id)
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("msg"))
+    return success_response(data={"submission_id": result["submission_id"]}, msg=result.get("msg", "已提交"))
+
+
+@router.post("/spaces/{space_id}/pages/{page_id}/submit-public")
+async def submit_page_public(
+    space_id: int,
+    page_id: int,
+    user: Annotated[User, Depends(get_current_user)],
+    _perm: Annotated[User, Depends(_require_perm("knowledge_base:submission:submit"))],
+):
+    """把一个词条推送到知识中心（正文快照 → AI 甄选 → 自动入库）。"""
+    result = await push.submit_public_content(user.id, space_id, page_id=page_id)
     if not result.get("ok"):
         raise HTTPException(status_code=400, detail=result.get("msg"))
     return success_response(data={"submission_id": result["submission_id"]}, msg=result.get("msg", "已提交"))
@@ -53,7 +61,7 @@ async def my_submissions(
     user: Annotated[User, Depends(get_current_user)],
     _perm: Annotated[User, Depends(_require_perm("knowledge_base:submission:submit"))],
 ):
-    """我提交的推送单（全状态）。"""
+    """我提交的推送记录（全状态留痕）。"""
     subs = list((await db.execute(
         select(KbPublicSubmission).where(KbPublicSubmission.submitted_by == user.id)
         .order_by(KbPublicSubmission.id.desc())
@@ -65,19 +73,19 @@ async def my_submissions(
     })
 
 
-# ---------------------------------------------------------------- 审核队列
+# ---------------------------------------------------------------- 推送记录（留痕）
 
 @router.get("/submissions")
 async def list_submissions(
     db: Annotated[AsyncSession, Depends(get_db)],
     user: Annotated[User, Depends(get_current_user)],
     _perm: Annotated[User, Depends(_require_perm("knowledge_base:submission:review"))],
-    status: str = Query(default="pending", max_length=20),
+    status: str = Query(default="all", max_length=20),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=50),
 ):
-    """审核/处置队列（pending=待审 / violation=违规处置 / approved/rejected/disposed=历史）。"""
-    if status not in ("ai_reviewing", "pending", "approved", "rejected", "violation", "disposed", "all"):
+    """推送记录（留痕）：全状态流水；violation=待处置违规队列。"""
+    if status not in ("ai_reviewing", "approved", "violation", "disposed", "all"):
         raise HTTPException(status_code=400, detail="无效的状态过滤")
 
     from sqlalchemy import func
@@ -110,67 +118,6 @@ async def _category_names(db: AsyncSession, subs: list) -> dict[int, str]:
     return {c.id: c.name for c in cats}
 
 
-@router.get("/submissions/targets")
-async def list_push_targets(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    user: Annotated[User, Depends(get_current_user)],
-    _perm: Annotated[User, Depends(_require_perm("knowledge_base:submission:submit"))],
-):
-    """可选目标公开库列表（提交推送时的下拉数据）。
-
-    附 can_create_public：有维护者权限的提交人可在推送弹窗内直接新建公开库
-    （无公开库时空态引导的关键交互——修复「推送没得选」）。
-    """
-    spaces = list((await db.execute(
-        select(KbSpace).where(
-            KbSpace.visibility == "public", KbSpace.status == "active"
-        ).order_by(KbSpace.id)
-    )).scalars().all())
-    from src.core.deps import get_user_permissions
-
-    perms = get_user_permissions(user)
-    return success_response(data={
-        "items": [{"id": s.id, "name": s.name, "category_id": s.category_id} for s in spaces],
-        "can_create_public": "*" in perms or "knowledge_base:promotion:review" in perms,
-    })
-
-
-@router.post("/submissions/targets")
-async def create_push_target(
-    body: dict,
-    db: Annotated[AsyncSession, Depends(get_db)],
-    user: Annotated[User, Depends(get_current_user)],
-    _perm: Annotated[User, Depends(_require_perm("knowledge_base:promotion:review"))],
-):
-    """推送弹窗内快速新建公开库（维护者；权限与创建公开空间同源 promotion:review）。"""
-    from src.plugins.builtin.knowledge_base.pipeline.ingest_api import create_space
-
-    result = await create_space(
-        user.id,
-        str(body.get("name") or ""),
-        str(body.get("description") or ""),
-        visibility="public",
-    )
-    if not result.get("ok"):
-        raise HTTPException(status_code=400, detail=result.get("msg"))
-    space_id = result["space_id"]
-    if body.get("category_id"):
-        cat = (await db.execute(
-            select(KbCategory).where(KbCategory.id == int(body["category_id"]))
-        )).scalars().first()
-        if cat is None:
-            raise HTTPException(status_code=400, detail="分类不存在")
-        space = (await db.execute(
-            select(KbSpace).where(KbSpace.id == space_id)
-        )).scalars().first()
-        space.category_id = int(body["category_id"])
-        await db.commit()
-    return success_response(
-        data={"id": space_id, "name": str(body.get("name")), "category_id": body.get("category_id")},
-        msg="公开库已创建",
-    )
-
-
 @router.get("/submissions/{submission_id}")
 async def get_submission(
     submission_id: int,
@@ -178,7 +125,7 @@ async def get_submission(
     user: Annotated[User, Depends(get_current_user)],
     _perm: Annotated[User, Depends(_require_perm("knowledge_base:submission:review"))],
 ):
-    """推送单详情（含全文，供审核员细读）。"""
+    """推送单详情（含全文，供复查细读）。"""
     sub = (await db.execute(
         select(KbPublicSubmission).where(KbPublicSubmission.id == submission_id)
     )).scalars().first()
@@ -193,26 +140,21 @@ async def get_submission(
     return success_response(data=out)
 
 
-@router.post("/submissions/{submission_id}/review")
-async def review_push(
+@router.post("/submissions/{submission_id}/check")
+async def check_submission(
     submission_id: int,
     body: dict,
     db: Annotated[AsyncSession, Depends(get_db)],
     user: Annotated[User, Depends(get_current_user)],
     _perm: Annotated[User, Depends(_require_perm("knowledge_base:submission:review"))],
 ):
-    """人审推送单：approve=true 通过（可改分类/目标库）→ 入公开库拆词条；false 拒绝。"""
-    result = await push.review_submission(
-        user.id, submission_id,
-        approve=bool(body.get("approve")),
-        category_id=body.get("category_id"),
-        target_space_id=body.get("target_space_id"),
-        comment=str(body.get("comment") or ""),
+    """复查登记（留痕）：登记复查意见，不改推送结果。"""
+    result = await push.register_check(
+        user.id, submission_id, str(body.get("comment") or ""),
     )
     if not result.get("ok"):
         raise HTTPException(status_code=400, detail=result.get("msg"))
-    msg = "已通过并入库" if result.get("status") == "approved" else "已拒绝"
-    return success_response(data=result, msg=msg + (f"：{result['msg']}" if result.get("msg") else ""))
+    return success_response(msg="复查意见已登记")
 
 
 @router.post("/submissions/{submission_id}/dispose")

@@ -1,9 +1,12 @@
-"""N3 聊天知识库偏好 + 自动注入 + 站点爬虫测试。
+"""N3 聊天知识库偏好（周期三启用集合模型）+ 自动注入 + 站点爬虫测试。
 
 覆盖：
-- get/set_chat_prefs：默认值、非法 scope 拒绝、幂等 upsert
-- build_context_injection：auto_inject 关→None；scope=off→None；
-  开启后包含记忆/画像/词条分节；memory_enabled 关→无记忆分节；长度护栏
+- get/set_chat_prefs：默认值（include_hub 开、enabled_spaces 空列表）、
+  非法输入容错（非列表→[]）、幂等 upsert
+- _is_enabled / _space_filter：hub 或空间任一启用；空列表+hub 关→未启用
+- build_context_injection：auto_inject 关→None；未启用→None；
+  开启后包含记忆/画像/词条分节；memory_enabled 关→无记忆分节；
+  include_hub=False → 只注入个人空间词条
 - patch/unpatch runner：包装与还原幂等
 - crawl_site 护栏：联网开关关→拒绝；非 http→拒绝（网络 IO 不出网，仅验护栏短路）
 - _discover_links：同域过滤、静态资源跳过
@@ -15,7 +18,6 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from src.db import Base
 from src.plugins.builtin.knowledge_base.collector import site as site_mod
 from src.plugins.builtin.knowledge_base.models import (
-    KbDocSource,
     KbMemoryItem,
     KbProfile,
     KbSetting,
@@ -24,6 +26,7 @@ from src.plugins.builtin.knowledge_base.models import (
     PluginBase,
 )
 from src.plugins.builtin.knowledge_base.pipeline import chat_prefs as cp
+from src.plugins.builtin.knowledge_base.pipeline import hub as hub_mod
 from src.plugins.builtin.knowledge_base.pipeline import memory as memory_pipeline
 from src.plugins.builtin.knowledge_base.pipeline import retrieval as retrieval_mod
 
@@ -37,9 +40,11 @@ async def env(monkeypatch, tmp_path):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await conn.run_sync(PluginBase.metadata.create_all)
-    for mod in (cp, memory_pipeline, retrieval_mod):
+    for mod in (cp, memory_pipeline, retrieval_mod, hub_mod):
         monkeypatch.setattr(mod, "SessionLocal", factory)
+    hub_mod.reset_hub_cache()
     yield factory
+    hub_mod.reset_hub_cache()
     await engine.dispose()
 
 
@@ -49,20 +54,23 @@ async def env(monkeypatch, tmp_path):
 async def test_chat_prefs_defaults_and_set(env):
     prefs = await cp.get_chat_prefs(USER_ID)
     assert prefs == {
-        "recall_scope": "private", "recall_space_id": 0,
+        "include_hub": True, "enabled_spaces": [],
         "memory_enabled": True, "auto_inject": False,
     }
 
-    bad = await cp.set_chat_prefs(USER_ID, {"recall_scope": "galaxy"})
-    assert not bad["ok"]
+    # 非法输入容错：非列表 → []
+    bad = await cp.set_chat_prefs(USER_ID, {"enabled_spaces": "not-a-list"})
+    assert bad["ok"]
+    assert (await cp.get_chat_prefs(USER_ID))["enabled_spaces"] == []
 
     ok = await cp.set_chat_prefs(USER_ID, {
-        "recall_scope": "space", "recall_space_id": 5,
+        "include_hub": False, "enabled_spaces": [1, 2, "x", 3],
         "memory_enabled": False, "auto_inject": True,
     })
     assert ok["ok"]
     prefs2 = await cp.get_chat_prefs(USER_ID)
-    assert prefs2["recall_scope"] == "space" and prefs2["recall_space_id"] == 5
+    assert prefs2["include_hub"] is False
+    assert prefs2["enabled_spaces"] == [1, 2, 3]  # 非法项被滤掉
     assert prefs2["memory_enabled"] is False and prefs2["auto_inject"] is True
 
     async with env() as db:
@@ -72,40 +80,57 @@ async def test_chat_prefs_defaults_and_set(env):
         assert {r.key for r in rows} == set(cp._PREF_KEYS)  # upsert 不重复
 
     # 幂等：再写一次同值不报错
-    assert (await cp.set_chat_prefs(USER_ID, {"recall_scope": "space", "recall_space_id": 5})).get("ok")
+    assert (await cp.set_chat_prefs(USER_ID, {"enabled_spaces": [1, 2, 3]})).get("ok")
+
+
+def test_is_enabled_and_space_filter():
+    # hub 开 → 启用
+    assert cp._is_enabled({"include_hub": True, "enabled_spaces": []}) is True
+    # 选了空间 → 启用（hub 关）
+    assert cp._is_enabled({"include_hub": False, "enabled_spaces": [5]}) is True
+    # 全关 → 未启用
+    assert cp._is_enabled({"include_hub": False, "enabled_spaces": []}) is False
+    # 空间过滤：未显式选 = None（全部自己的空间）；显式选了 = 该列表
+    assert cp._space_filter({"include_hub": True, "enabled_spaces": []}) is None
+    assert cp._space_filter({"include_hub": True, "enabled_spaces": [1, 2]}) == [1, 2]
 
 
 # ---------------------------------------------------------------- 自动注入
 
 async def _seed_recall_data(env):
+    """用户画像/记忆 + 个人空间词条 + 知识中心 hub 词条。"""
+    hub_id = await hub_mod.get_hub_space_id()
     async with env() as db:
         db.add(KbProfile(user_id=USER_ID, profile_md="## 基本信息\nVue3 独立开发者", version=1))
         db.add(KbMemoryItem(user_id=USER_ID, mem_type="fact", content="用户的技术栈是 Vue3 组合式 API",
                             content_hash="m1", confidence=0.9, source_count=2))
-        space = KbSpace(owner_user_id=USER_ID, name="私有库", visibility="private")
+        space = KbSpace(owner_user_id=USER_ID, name="个人库", visibility="private")
         db.add(space)
         await db.flush()
         db.add(KbWikiPage(space_id=space.id, slug="vue3", title="Vue3 组合式 API",
                           body_md="Vue3 组合式 API 的知识 " * 10, status="live",
+                          confidence=0.9, source_count=2))
+        db.add(KbWikiPage(space_id=hub_id, slug="hub-fastapi", title="FastAPI 指南",
+                          body_md="FastAPI 路由与依赖注入的知识 " * 10, status="live",
                           confidence=0.9, source_count=2))
         await db.commit()
         return space.id
 
 
 @pytest.mark.asyncio
-async def test_injection_off_and_scope_off(env):
+async def test_injection_off_and_disabled(env):
     await _seed_recall_data(env)
     # 默认（auto_inject=False）→ 无注入
     assert await cp.build_context_injection(USER_ID, "Vue3 组合式") is None
-    # scope=off → 即使 auto_inject 也无注入
-    await cp.set_chat_prefs(USER_ID, {"recall_scope": "off", "auto_inject": True})
+    # 未启用（hub 关 + 空列表）→ 即使 auto_inject 也无注入
+    await cp.set_chat_prefs(USER_ID, {"include_hub": False, "enabled_spaces": [], "auto_inject": True})
     assert await cp.build_context_injection(USER_ID, "Vue3") is None
 
 
 @pytest.mark.asyncio
 async def test_injection_full_sections(env):
     await _seed_recall_data(env)
-    await cp.set_chat_prefs(USER_ID, {"recall_scope": "private", "auto_inject": True})
+    await cp.set_chat_prefs(USER_ID, {"auto_inject": True})
     text = await cp.build_context_injection(USER_ID, "Vue3 组合式 API")
     assert text is not None
     assert "知识库上下文" in text
@@ -119,7 +144,7 @@ async def test_injection_full_sections(env):
 @pytest.mark.asyncio
 async def test_injection_memory_disabled(env):
     await _seed_recall_data(env)
-    await cp.set_chat_prefs(USER_ID, {"recall_scope": "private", "auto_inject": True, "memory_enabled": False})
+    await cp.set_chat_prefs(USER_ID, {"auto_inject": True, "memory_enabled": False})
     text = await cp.build_context_injection(USER_ID, "Vue3 组合式 API")
     assert text is not None
     assert "用户画像摘要" not in text
@@ -128,13 +153,19 @@ async def test_injection_memory_disabled(env):
 
 
 @pytest.mark.asyncio
-async def test_injection_public_scope_filters_private(env):
-    await _seed_recall_data(env)
-    await cp.set_chat_prefs(USER_ID, {"recall_scope": "public", "auto_inject": True})
-    text = await cp.build_context_injection(USER_ID, "Vue3 组合式 API")
-    # 无公开库内容 → 无词条分节（私有内容不因公开范围外泄）
+async def test_injection_hub_excluded(env):
+    """include_hub=False + 显式选个人空间 → 词条分节只有个人库内容，hub 词条不进注入。"""
+    space_id = await _seed_recall_data(env)
+    await cp.set_chat_prefs(USER_ID, {
+        "include_hub": False, "enabled_spaces": [space_id], "auto_inject": True,
+    })
+    text = await cp.build_context_injection(USER_ID, "FastAPI 指南")
     assert text is not None
-    assert "相关知识词条" not in text
+    assert "FastAPI 路由" not in text  # hub 词条不注入
+    # hub 词条可见的查询走默认偏好（hub 开）→ hub 词条出现
+    await cp.set_chat_prefs(USER_ID, {"auto_inject": True, "include_hub": True})
+    text2 = await cp.build_context_injection(USER_ID, "FastAPI 指南")
+    assert text2 is not None and "FastAPI" in text2
 
 
 # ---------------------------------------------------------------- runner patch
@@ -187,5 +218,5 @@ def test_discover_links_same_site_only():
     assert "https://docs.example.com/guide" in links
     assert "https://docs.example.com/advanced" in links
     assert "https://docs.example.com/docs" in links  # anchor 剥离
-    assert all(l.startswith("https://docs.example.com") for l in links)
-    assert all(not l.endswith(".png") for l in links)
+    assert all(link.startswith("https://docs.example.com") for link in links)
+    assert all(not link.endswith(".png") for link in links)

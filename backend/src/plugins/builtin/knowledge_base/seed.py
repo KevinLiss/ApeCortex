@@ -87,7 +87,7 @@ async def seed_knowledge_base_data(db: AsyncSession) -> None:
         await db.flush()
         logger.info("Migrated: '词条管理' menu merged into '知识空间'")
 
-    # ── 1.6 N2 菜单迁移：「晋升审核」改名「审核中心」──────────
+    # ── 1.6 菜单迁移：promotions 菜单统一改名「推送中心」（周期三）──────────
     review_menu = next(
         (m for m in (await db.execute(
             select(Menu).where(
@@ -96,12 +96,29 @@ async def seed_knowledge_base_data(db: AsyncSession) -> None:
         )).scalars().all()),
         None,
     )
-    if review_menu is not None and review_menu.name != "审核中心":
-        review_menu.name = "审核中心"
+    if review_menu is not None and review_menu.name != "推送中心":
+        old_name = review_menu.name
+        review_menu.name = "推送中心"
+        review_menu.permission = "knowledge_base:submission:review"
         await db.flush()
-        logger.info("Migrated: '晋升审核' menu renamed to '审核中心'")
+        logger.info(f"Migrated: {old_name!r} menu renamed to '推送中心'")
 
-    # ── 2. 子菜单 + 按钮权限（N1 重构后结构）─────────
+    # ── 1.7 菜单迁移：删共享/晋升遗留按钮（周期三下线功能）──────────
+    dead_perms = (
+        "knowledge_base:promotion:submit",
+        "knowledge_base:promotion:review",
+        "knowledge_base:page:publish",
+    )
+    stale = list((await db.execute(
+        select(Menu).where(Menu.permission.in_(dead_perms))
+    )).scalars().all())
+    for m in stale:
+        await db.delete(m)
+    if stale:
+        await db.flush()
+        logger.info(f"Removed {len(stale)} stale menu buttons (promotion/publish)")
+
+    # ── 2. 子菜单 + 按钮权限（周期三结构）─────────
     # (name, parent_name, type, path, component, permission, icon, sort, i18n_key)
     menu_specs = [
         ("知识中心", None, "C", "hub", "knowledge_base/hub/index",
@@ -112,27 +129,24 @@ async def seed_knowledge_base_data(db: AsyncSession) -> None:
         ("新建空间", "知识空间", "F", None, None, "knowledge_base:space:create", None, 1, None),
         ("上传文档", "知识空间", "F", None, None, "knowledge_base:doc:upload", None, 2, None),
         ("删除文档", "知识空间", "F", None, None, "knowledge_base:doc:delete", None, 3, None),
-        ("发布词条", "知识空间", "F", None, None, "knowledge_base:page:publish", None, 4, None),
-        ("编辑词条", "知识空间", "F", None, None, "knowledge_base:page:edit", None, 5, None),
-        ("编译文档", "知识空间", "F", None, None, "knowledge_base:doc:compile", None, 6, None),
-        ("提交推送", "知识空间", "F", None, None, "knowledge_base:submission:submit", None, 7, None),
-        ("审核中心", None, "C", "promotions", "knowledge_base/promotions/index",
-         "knowledge_base:promotion:review", "Stamp", 3, "menu.kb.promotions"),
-        ("提交晋升", "审核中心", "F", None, None, "knowledge_base:promotion:submit", None, 1, None),
-        ("审核晋升", "审核中心", "F", None, None, "knowledge_base:promotion:review", None, 2, None),
-        ("审核推送", "审核中心", "F", None, None, "knowledge_base:submission:review", None, 3, None),
-        ("处置违规", "审核中心", "F", None, None, "knowledge_base:submission:dispose", None, 4, None),
+        ("编辑词条", "知识空间", "F", None, None, "knowledge_base:page:edit", None, 4, None),
+        ("编译文档", "知识空间", "F", None, None, "knowledge_base:doc:compile", None, 5, None),
+        ("推送知识中心", "知识空间", "F", None, None, "knowledge_base:submission:submit", None, 6, None),
+        ("推送中心", None, "C", "promotions", "knowledge_base/promotions/index",
+         "knowledge_base:submission:review", "Stamp", 3, "menu.kb.promotions"),
+        ("推送留痕", "推送中心", "F", None, None, "knowledge_base:submission:review", None, 1, None),
+        ("处置违规", "推送中心", "F", None, None, "knowledge_base:submission:dispose", None, 2, None),
         ("任务中心", None, "C", "tasks", "knowledge_base/tasks/index",
          "knowledge_base:task:list", "Timer", 4, "menu.kb.tasks"),
         ("重试任务", "任务中心", "F", None, None, "knowledge_base:task:retry", None, 1, None),
-        ("插件设置", None, "C", "settings", "knowledge_base/settings/index",
-         "knowledge_base:setting:read", "Setting", 6, "menu.kb.settings"),
-        ("保存设置", "插件设置", "F", None, None, "knowledge_base:setting:update", None, 1, None),
         ("记忆画像", None, "C", "profile", "knowledge_base/profile/index",
          "knowledge_base:profile:list", "User", 5, "menu.kb.profile"),
         ("查询记忆", "记忆画像", "F", None, None, "knowledge_base:profile:list", None, 1, None),
         ("删除记忆", "记忆画像", "F", None, None, "knowledge_base:profile:delete", None, 2, None),
         ("重写画像", "记忆画像", "F", None, None, "knowledge_base:profile:rewrite", None, 3, None),
+        ("插件设置", None, "C", "settings", "knowledge_base/settings/index",
+         "knowledge_base:setting:read", "Setting", 6, "menu.kb.settings"),
+        ("保存设置", "插件设置", "F", None, None, "knowledge_base:setting:update", None, 1, None),
     ]
 
     existing = list((await db.execute(select(Menu))).scalars().all())

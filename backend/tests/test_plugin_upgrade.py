@@ -25,7 +25,6 @@ from fastapi import FastAPI
 from src.plugins.base import PluginInfo
 from src.plugins.manager import PluginManager
 
-
 # ---------------------------------------------------------------- doubles
 
 class _DummyPlugin:

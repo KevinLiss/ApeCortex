@@ -34,6 +34,15 @@ _COLUMN_MIGRATIONS: dict[str, list[tuple[str, str]]] = {
     "kb_doc_source": [
         ("file_ext", "VARCHAR(10) NULL"),
     ],
+    "kb_wiki_page": [
+        ("category_id", "INTEGER NULL"),
+    ],
+    "kb_public_submission": [
+        ("source_page_id", "INTEGER NOT NULL DEFAULT 0"),
+        ("check_comment", "VARCHAR(500) NOT NULL DEFAULT ''"),
+        ("checked_by", "INTEGER NULL"),
+        ("checked_at", "TIMESTAMP NULL"),
+    ],
 }
 
 
@@ -65,7 +74,7 @@ class KnowledgeBasePlugin(PluginInterface):
         "私有/共享/公开空间与 PR 式晋升、三通道召回、联网采集与学术深度调研、"
         "公开库只读出口与 MCP 知识接口。"
     )
-    version = "0.7.0"
+    version = "0.8.0"
     author = "ApeAdmin"
 
     # ── 生命周期：安装（建表 + seed）──────────────────

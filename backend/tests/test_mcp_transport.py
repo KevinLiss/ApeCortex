@@ -20,9 +20,9 @@ from src.core.config import settings
 
 def _build_app(monkeypatch, superadmin):
     """Build a minimal app with MCP routes and stubbed auth."""
+    from src.api.system import router as system_router  # noqa: F401
     from src.core import deps as core_deps
     from src.core.exceptions import register_exception_handlers
-    from src.api.system import router as system_router  # noqa: F401
     from src.mcp.streamable_http import router as mcp_router
 
     async def _fake_user():
@@ -68,7 +68,10 @@ def test_streamable_tools_list_and_call(mcp_client):
     # tools/call — unknown tool yields a JSON-RPC error, not a crash
     resp = mcp_client.post(
         "/api/v1/mcp",
-        json={"jsonrpc": "2.0", "method": "tools/call", "params": {"name": "no_such_tool_xyz", "arguments": {}}, "id": 3},
+        json={
+            "jsonrpc": "2.0", "method": "tools/call",
+            "params": {"name": "no_such_tool_xyz", "arguments": {}}, "id": 3,
+        },
     )
     err = resp.json()["error"]
     assert err["code"] == -32602
@@ -111,9 +114,8 @@ def test_streamable_unknown_method_yields_rpc_error(mcp_client):
 
 def test_sse_ticket_roundtrip_redis_fallback(monkeypatch):
     """Ticket issue/consume works over the kv layer with memory fallback."""
-    from src.core.redis_client import memory_clear, reset_for_tests
+    from src.core.redis_client import kv_set, memory_clear, reset_for_tests
     from src.mcp.sse_transport import consume_ticket
-    from src.core.redis_client import kv_set
 
     monkeypatch.setattr(settings, "REDIS_ENABLED", False, raising=False)
     reset_for_tests()

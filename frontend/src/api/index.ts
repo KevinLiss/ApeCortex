@@ -302,34 +302,12 @@ export const getKbPage = (pageId: number) => request.get(`/knowledge-base/pages/
 export const updateKbPage = (pageId: number, data: any) => request.put(`/knowledge-base/pages/${pageId}`, data)
 export const getKbPageRevisions = (pageId: number, params?: any) => request.get(`/knowledge-base/pages/${pageId}/revisions`, { params })
 export const publishKbPage = (pageId: number, status: string) => request.post(`/knowledge-base/pages/${pageId}/publish`, { status })
-export const submitKbPromotion = (data: any) => request.post('/knowledge-base/promotions', data)
-export const getKbPromotions = (params?: any) => request.get('/knowledge-base/promotions', { params })
-export const getMyKbPromotions = () => request.get('/knowledge-base/promotions/mine')
-export const reviewKbPromotion = (id: number, approve: boolean, comment?: string) => request.post(`/knowledge-base/promotions/${id}/review`, { approve, comment })
 export const getKbJobs = (params?: any, opts?: any) => request.get('/knowledge-base/jobs', { params, ...(opts || {}) })
 export const retryKbJob = (id: number) => request.post(`/knowledge-base/jobs/${id}/retry`)
 export const getKbWebSettings = () => request.get('/knowledge-base/settings/web')
 export const putKbWebSettings = (data: any) => request.put('/knowledge-base/settings/web', data)
-export const getKbContributions = (params?: any) => request.get('/knowledge-base/contributions', { params })
 
-// ---- Knowledge Base M3：共享成员 / 待发布 / 只读凭证 ----
-export const getKbSpaceMembers = (spaceId: number) => request.get(`/knowledge-base/spaces/${spaceId}/members`)
-export const addKbSpaceMember = (spaceId: number, data: any) => request.post(`/knowledge-base/spaces/${spaceId}/members`, data)
-export const removeKbSpaceMember = (spaceId: number, userId: number) => request.delete(`/knowledge-base/spaces/${spaceId}/members/${userId}`)
-export const getKbPendingPublish = () => request.get('/knowledge-base/promotions/pending-publish')
-export const getKbPublicKeys = () => request.get('/knowledge-base/public-keys')
-export const createKbPublicKey = (data: any) => request.post('/knowledge-base/public-keys', data)
-export const deleteKbPublicKey = (id: number) => request.delete(`/knowledge-base/public-keys/${id}`)
-
-// ---- Knowledge Base N1：知识中心 / 文档管理 ----
-export const getKbCategories = () => request.get('/knowledge-base/hub/categories')
-export const createKbCategory = (data: any) => request.post('/knowledge-base/hub/categories', data)
-export const updateKbCategory = (id: number, data: any) => request.put(`/knowledge-base/hub/categories/${id}`, data)
-export const deleteKbCategory = (id: number) => request.delete(`/knowledge-base/hub/categories/${id}`)
-export const assignKbSpaceCategory = (spaceId: number, categoryId: number | null) => request.put(`/knowledge-base/hub/spaces/${spaceId}/category`, { category_id: categoryId })
-export const getKbHubSpaces = (params?: any) => request.get('/knowledge-base/hub/spaces', { params })
-export const getKbHubPages = (params?: any) => request.get('/knowledge-base/hub/pages', { params })
-export const getKbHubPage = (pageId: number) => request.get(`/knowledge-base/hub/pages/${pageId}`)
+// ---- Knowledge Base：文档管理 / 凭证 ----
 export const getKbSpaceDocs = (spaceId: number) => request.get(`/knowledge-base/spaces/${spaceId}/docs`)
 export const getKbSpaceDoc = (spaceId: number, docId: number) => request.get(`/knowledge-base/spaces/${spaceId}/docs/${docId}`)
 export const uploadKbDocFile = (spaceId: number, file: File) => {
@@ -341,21 +319,30 @@ export const uploadKbDocFile = (spaceId: number, file: File) => {
 }
 export const deleteKbDoc = (spaceId: number, docId: number) => request.delete(`/knowledge-base/spaces/${spaceId}/docs/${docId}`)
 export const compileKbDoc = (spaceId: number, docId: number) => request.post(`/knowledge-base/spaces/${spaceId}/docs/${docId}/compile`)
-
-// ---- Knowledge Base N2：公开库推送与审核 ----
-export const submitKbPublic = (spaceId: number, docId: number, data: any) => request.post(`/knowledge-base/spaces/${spaceId}/docs/${docId}/submit-public`, data)
-export const getKbPushTargets = () => request.get('/knowledge-base/submissions/targets')
-export const createKbPushTarget = (data: any) => request.post('/knowledge-base/submissions/targets', data)
 export const downloadKbDoc = (spaceId: number, docId: number) => request.get(
   `/knowledge-base/spaces/${spaceId}/docs/${docId}/download`,
   { responseType: 'blob' },
 )
+export const getKbPublicKeys = () => request.get('/knowledge-base/public-keys')
+export const createKbPublicKey = (data: any) => request.post('/knowledge-base/public-keys', data)
+export const deleteKbPublicKey = (id: number) => request.delete(`/knowledge-base/public-keys/${id}`)
+
+// ---- Knowledge Base 周期三：知识中心 / 推送 ----
+export const getKbCategories = () => request.get('/knowledge-base/hub/categories')
+export const createKbCategory = (data: any) => request.post('/knowledge-base/hub/categories', data)
+export const updateKbCategory = (id: number, data: any) => request.put(`/knowledge-base/hub/categories/${id}`, data)
+export const deleteKbCategory = (id: number) => request.delete(`/knowledge-base/hub/categories/${id}`)
+export const getKbHubPages = (params?: any) => request.get('/knowledge-base/hub/pages', { params })
+export const getKbHubPage = (pageId: number) => request.get(`/knowledge-base/hub/pages/${pageId}`)
+
+// ---- Knowledge Base 周期三：推送 / 聊天偏好 ----
 export const getKbSubmissions = (params?: any) => request.get('/knowledge-base/submissions', { params })
 export const getMyKbSubmissions = () => request.get('/knowledge-base/submissions/mine')
 export const getKbSubmission = (id: number) => request.get(`/knowledge-base/submissions/${id}`)
-export const reviewKbSubmission = (id: number, data: any) => request.post(`/knowledge-base/submissions/${id}/review`, data)
+export const checkKbSubmission = (id: number, data: any) => request.post(`/knowledge-base/submissions/${id}/check`, data)
 export const disposeKbSubmission = (id: number, data: any) => request.post(`/knowledge-base/submissions/${id}/dispose`, data)
+export const submitKbDocPublic = (spaceId: number, docId: number) => request.post(`/knowledge-base/spaces/${spaceId}/docs/${docId}/submit-public`, {})
+export const submitKbPagePublic = (spaceId: number, pageId: number) => request.post(`/knowledge-base/spaces/${spaceId}/pages/${pageId}/submit-public`, {})
 
-// ---- Knowledge Base N3：聊天知识库偏好 ----
 export const getKbChatPrefs = () => request.get('/knowledge-base/chat-prefs')
 export const putKbChatPrefs = (data: any) => request.put('/knowledge-base/chat-prefs', data)
