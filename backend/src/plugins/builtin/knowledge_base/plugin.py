@@ -26,6 +26,31 @@ from src.plugins.builtin.knowledge_base.seed import seed_knowledge_base_data
 # 宿主聊天完成事件（见 src/ai/runner.py _finish_run 中的发射点）
 _EVENT_CHAT_COMPLETE = "chat_message_complete"
 
+# 存量表新增列迁移清单：表 → (列名, DDL 类型)。启动时 PRAGMA 自查，缺则 ALTER TABLE 补列。
+_COLUMN_MIGRATIONS: dict[str, list[tuple[str, str]]] = {
+    "kb_space": [
+        ("category_id", "INTEGER NULL"),
+    ],
+}
+
+
+def _ensure_columns(sync_conn) -> None:
+    """SQLite 友好的列级迁移：缺列补列，幂等（在 create_all 之后跑）。"""
+    from sqlalchemy import text
+
+    for table, columns in _COLUMN_MIGRATIONS.items():
+        try:
+            existing = {
+                row[1] for row in sync_conn.execute(text(f"PRAGMA table_info({table})"))
+            }
+        except Exception:  # noqa: BLE001 — 表不存在（首装时 create_all 已建最新结构）
+            continue
+        for col, ddl in columns:
+            if col in existing:
+                continue
+            sync_conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}"))
+            logger.info(f"[KnowledgeBase] 迁移：{table} 补列 {col}")
+
 
 class KnowledgeBasePlugin(PluginInterface):
     """AI 知识库插件——聊天知识自动沉淀与用户画像。"""
@@ -37,19 +62,20 @@ class KnowledgeBasePlugin(PluginInterface):
         "私有/共享/公开空间与 PR 式晋升、三通道召回、联网采集与学术深度调研、"
         "公开库只读出口与 MCP 知识接口。"
     )
-    version = "0.4.0"
+    version = "0.5.0"
     author = "ApeAdmin"
 
     # ── 生命周期：安装（建表 + seed）──────────────────
     async def install(self) -> None:
         from src.db import engine
 
-        # create_all 幂等：P0 已安装的库升级 P1 时，新表自动补建（SQLite 不做列级 ALTER，
-        # 模型演进遵循"新功能新表"纪律；既有表不删列）
+        # create_all 幂等：P0 已安装的库升级时新表自动补建；既有表新增列走
+        # _ensure_columns 的 PRAGMA 自查 + ALTER TABLE ADD COLUMN（SQLite 安全路径）
         async with engine.begin() as conn:
             await conn.run_sync(
                 lambda sync_conn: PluginBase.metadata.create_all(sync_conn)
             )
+            await conn.run_sync(_ensure_columns)
 
         async with SessionLocal() as db:
             await seed_knowledge_base_data(db)
@@ -76,7 +102,7 @@ class KnowledgeBasePlugin(PluginInterface):
         logger.info("[KnowledgeBase] uninstalled — tables dropped, menus removed")
 
     def on_load(self) -> None:
-        """启动时恢复孤儿任务（P1：kb_job 表）。"""
+        """启动时恢复孤儿任务 + 菜单结构自愈迁移（幂等，旧库升级即收敛）。"""
         import asyncio
 
         async def _recover() -> None:
@@ -86,21 +112,35 @@ class KnowledgeBasePlugin(PluginInterface):
             except Exception as exc:  # noqa: BLE001
                 logger.warning(f"[KnowledgeBase] 孤儿任务恢复跳过（表未建/首装）: {exc}")
 
+        async def _reseed_menus() -> None:
+            # N1 升级自愈：旧库的菜单结构（顶级目录名/词条管理独立菜单）在重启后自动收敛
+            try:
+                async with SessionLocal() as db:
+                    await seed_knowledge_base_data(db)
+                    await db.commit()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(f"[KnowledgeBase] 菜单自愈迁移跳过: {exc}")
+
         try:
             loop = asyncio.get_running_loop()
             loop.create_task(_recover())
+            loop.create_task(_reseed_menus())
         except RuntimeError:
             pass
 
     # ── 生命周期：注册路由 + 事件 ──────────────────────
     def register(self, app: FastAPI) -> None:
         from src.plugins.builtin.knowledge_base.api import router
+        from src.plugins.builtin.knowledge_base.api_docs import router as docs_router
+        from src.plugins.builtin.knowledge_base.api_hub import router as hub_router
         from src.plugins.builtin.knowledge_base.api_public import router as public_router
         from src.plugins.builtin.knowledge_base.api_wiki import router as wiki_router
 
         app.include_router(router, prefix=settings.API_PREFIX)
         app.include_router(wiki_router, prefix=settings.API_PREFIX)
         app.include_router(public_router, prefix=settings.API_PREFIX)
+        app.include_router(hub_router, prefix=settings.API_PREFIX)
+        app.include_router(docs_router, prefix=settings.API_PREFIX)
 
         # 订阅聊天完成事件 → 后台记忆提取（handler 内部 spawn 任务，快速返回）
         event_bus.on(

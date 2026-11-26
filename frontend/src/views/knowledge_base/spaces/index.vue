@@ -1,186 +1,194 @@
 <template>
   <div class="kb-spaces-page">
-    <div class="page-header">
-      <div>
-        <h2>{{ t('knowledge.spaces.title') }}</h2>
-        <p class="text-muted">{{ t('knowledge.spaces.subtitle') }}</p>
+    <!-- ═══════════ 列表视图 ═══════════ -->
+    <template v-if="!currentSpace">
+      <div class="page-header">
+        <div>
+          <h2>{{ t('knowledge.spaces.title') }}</h2>
+          <p class="text-muted">{{ t('knowledge.spaces.subtitle') }}</p>
+        </div>
+        <el-button type="primary" @click="createVisible = true" v-permission="'knowledge_base:space:create'">
+          <el-icon><Plus /></el-icon>
+          <span>{{ t('knowledge.spaces.create') }}</span>
+        </el-button>
       </div>
-      <el-button type="primary" @click="createVisible = true" v-permission="'knowledge_base:space:create'">
-        <el-icon><Plus /></el-icon>
-        <span>{{ t('knowledge.spaces.create') }}</span>
-      </el-button>
-    </div>
 
-    <!-- 我的空间 -->
-    <div class="group-title">{{ t('knowledge.spaces.owned') }}</div>
-    <el-row :gutter="16">
-      <el-col v-for="s in ownedSpaces" :key="s.id" :xs="24" :sm="12" :md="8" :lg="6">
-        <el-card shadow="hover" class="space-card" @click="openPages(s)">
-          <div class="space-head">
-            <div class="space-icon"><el-icon :size="20"><Folder /></el-icon></div>
-            <div class="space-meta">
-              <div class="space-name">{{ s.name }}</div>
-              <el-tag size="small" :type="s.visibility === 'public' ? 'success' : s.visibility === 'shared' ? 'warning' : 'info'" effect="plain" round>
-                {{ s.visibility === 'public' ? t('knowledge.spaces.publicTag')
-                  : s.visibility === 'shared' ? t('knowledge.spaces.sharedTag')
-                  : t('knowledge.spaces.privateTag') }}
+      <!-- 我的空间 -->
+      <div class="group-title">{{ t('knowledge.spaces.owned') }}</div>
+      <el-row :gutter="16">
+        <el-col v-for="s in ownedSpaces" :key="s.id" :xs="24" :sm="12" :md="8" :lg="6">
+          <el-card shadow="hover" class="space-card" @click="openSpace(s)">
+            <div class="space-head">
+              <div class="space-icon" :class="{ shared: s.visibility === 'shared' }">
+                <el-icon :size="20"><Folder /></el-icon>
+              </div>
+              <div class="space-meta">
+                <div class="space-name">{{ s.name }}</div>
+                <el-tag size="small" :type="s.visibility === 'shared' ? 'warning' : 'info'" effect="plain" round>
+                  {{ s.visibility === 'shared' ? t('knowledge.spaces.sharedTag') : t('knowledge.spaces.privateTag') }}
+                </el-tag>
+              </div>
+            </div>
+            <div class="space-desc">{{ s.description || '—' }}</div>
+            <div class="space-footer">
+              <span class="stat"><el-icon><Document /></el-icon>{{ s.page_count }} {{ t('knowledge.spaces.pages') }}</span>
+              <span class="stat"><el-icon><Right /></el-icon></span>
+            </div>
+          </el-card>
+        </el-col>
+        <el-col :xs="24" :sm="12" :md="8" :lg="6" v-if="!ownedSpaces.length">
+          <el-card shadow="never" class="empty-card">
+            <div class="empty-title">{{ t('knowledge.spaces.empty') }}</div>
+            <div class="empty-desc">{{ t('knowledge.spaces.emptyDesc') }}</div>
+          </el-card>
+        </el-col>
+      </el-row>
+
+      <!-- 共享空间（他人共享给我） -->
+      <div class="group-title" v-if="sharedSpaces.length">{{ t('knowledge.spaces.sharedGroup') }}</div>
+      <el-row :gutter="16" v-if="sharedSpaces.length">
+        <el-col v-for="s in sharedSpaces" :key="s.id" :xs="24" :sm="12" :md="8" :lg="6">
+          <el-card shadow="hover" class="space-card" @click="openSpace(s)">
+            <div class="space-head">
+              <div class="space-icon shared"><el-icon :size="20"><User /></el-icon></div>
+              <div class="space-meta">
+                <div class="space-name">{{ s.name }}</div>
+                <el-tag size="small" type="warning" effect="plain" round>
+                  {{ s.my_role === 'writer' ? t('knowledge.spaces.roleWriter') : t('knowledge.spaces.roleReader') }}
+                </el-tag>
+              </div>
+            </div>
+            <div class="space-desc">{{ s.description || '—' }}</div>
+            <div class="space-footer">
+              <span class="stat"><el-icon><Document /></el-icon>{{ s.page_count }} {{ t('knowledge.spaces.pages') }}</span>
+              <span class="stat"><el-icon><Right /></el-icon></span>
+            </div>
+          </el-card>
+        </el-col>
+      </el-row>
+
+      <!-- 公开空间 -->
+      <div class="group-title" v-if="publicSpaces.length">{{ t('knowledge.spaces.publicGroup') }}</div>
+      <el-row :gutter="16" v-if="publicSpaces.length">
+        <el-col v-for="s in publicSpaces" :key="s.id" :xs="24" :sm="12" :md="8" :lg="6">
+          <el-card shadow="hover" class="space-card" @click="openSpace(s)">
+            <div class="space-head">
+              <div class="space-icon public"><el-icon :size="20"><Collection /></el-icon></div>
+              <div class="space-meta">
+                <div class="space-name">{{ s.name }}</div>
+                <el-tag size="small" type="success" effect="plain" round>{{ t('knowledge.spaces.publicTag') }}</el-tag>
+              </div>
+            </div>
+            <div class="space-desc">{{ s.description || '—' }}</div>
+            <div class="space-footer">
+              <span class="stat"><el-icon><Document /></el-icon>{{ s.page_count }} {{ t('knowledge.spaces.pages') }}</span>
+              <span class="stat"><el-icon><Right /></el-icon></span>
+            </div>
+          </el-card>
+        </el-col>
+      </el-row>
+
+      <!-- 新建空间弹窗 -->
+      <el-dialog v-model="createVisible" :title="t('knowledge.spaces.create')" width="420px">
+        <el-form label-position="top">
+          <el-form-item :label="t('knowledge.spaces.name')">
+            <el-input v-model="newName" :placeholder="t('knowledge.spaces.namePlaceholder')" maxlength="100" />
+          </el-form-item>
+          <el-form-item :label="t('knowledge.spaces.desc')">
+            <el-input v-model="newDesc" type="textarea" :rows="2" :placeholder="t('knowledge.spaces.descPlaceholder')" maxlength="500" />
+          </el-form-item>
+          <el-form-item v-if="canCreatePublic" :label="t('knowledge.spaces.visibility')">
+            <el-radio-group v-model="newVisibility">
+              <el-radio value="private">{{ t('knowledge.spaces.visibilityPrivate') }}</el-radio>
+              <el-radio value="shared">{{ t('knowledge.spaces.visibilityShared') }}</el-radio>
+              <el-radio value="public">{{ t('knowledge.spaces.visibilityPublic') }}</el-radio>
+            </el-radio-group>
+            <div v-if="newVisibility === 'public'" class="visibility-hint">
+              {{ t('knowledge.spaces.visibilityPublicHint') }}
+            </div>
+          </el-form-item>
+        </el-form>
+        <template #footer>
+          <el-button @click="createVisible = false">{{ t('common.action.cancel') }}</el-button>
+          <el-button type="primary" :loading="creating" @click="handleCreate">{{ t('common.action.confirm') }}</el-button>
+        </template>
+      </el-dialog>
+    </template>
+
+    <!-- ═══════════ 详情视图 ═══════════ -->
+    <template v-else>
+      <div class="detail-header">
+        <el-button :icon="ArrowLeft" text @click="backToList">{{ t('knowledge.spaces.backToList') }}</el-button>
+        <div class="detail-title-wrap">
+          <div class="space-icon" :class="{ public: currentSpace.visibility === 'public', shared: currentSpace.visibility === 'shared' }">
+            <el-icon :size="20"><Folder /></el-icon>
+          </div>
+          <div class="detail-title-meta">
+            <div class="detail-title-line">
+              <h2>{{ currentSpace.name }}</h2>
+              <el-tag size="small" :type="currentSpace.visibility === 'public' ? 'success' : currentSpace.visibility === 'shared' ? 'warning' : 'info'" effect="plain" round>
+                {{ visibilityLabel(currentSpace.visibility) }}
               </el-tag>
             </div>
+            <p class="detail-desc">{{ currentSpace.description || '—' }}</p>
           </div>
-          <div class="space-desc">{{ s.description || '—' }}</div>
-          <div class="space-footer">
-            <span class="stat"><el-icon><Document /></el-icon>{{ s.page_count }} {{ t('knowledge.spaces.pages') }}</span>
-            <el-button size="small" type="primary" plain round @click.stop="openUpload(s)">
-              {{ t('knowledge.spaces.uploadDoc') }}
-            </el-button>
-            <el-button v-if="s.visibility === 'shared'" size="small" plain round @click.stop="openMembers(s)">
-              {{ t('knowledge.spaces.members') }}
-            </el-button>
+        </div>
+        <div class="detail-stats">
+          <div class="stat-block">
+            <span class="stat-num">{{ spaceSummary?.doc_count ?? currentSpace.doc_count ?? 0 }}</span>
+            <span class="stat-label">{{ t('knowledge.spaces.docsUnit') }}</span>
           </div>
-        </el-card>
-      </el-col>
-      <el-col :xs="24" :sm="12" :md="8" :lg="6" v-if="!ownedSpaces.length">
-        <el-card shadow="never" class="empty-card">
-          <div class="empty-title">{{ t('knowledge.spaces.empty') }}</div>
-          <div class="empty-desc">{{ t('knowledge.spaces.emptyDesc') }}</div>
-        </el-card>
-      </el-col>
-    </el-row>
-
-    <!-- 共享空间（他人共享给我） -->
-    <div class="group-title" v-if="sharedSpaces.length">{{ t('knowledge.spaces.sharedGroup') }}</div>
-    <el-row :gutter="16" v-if="sharedSpaces.length">
-      <el-col v-for="s in sharedSpaces" :key="s.id" :xs="24" :sm="12" :md="8" :lg="6">
-        <el-card shadow="hover" class="space-card" @click="openPages(s)">
-          <div class="space-head">
-            <div class="space-icon"><el-icon :size="20"><Folder /></el-icon></div>
-            <div class="space-meta">
-              <div class="space-name">{{ s.name }}</div>
-              <el-tag size="small" type="warning" effect="plain" round>{{ t('knowledge.spaces.sharedTag') }}</el-tag>
-            </div>
+          <div class="stat-block">
+            <span class="stat-num">{{ spaceSummary?.page_count ?? currentSpace.page_count ?? 0 }}</span>
+            <span class="stat-label">{{ t('knowledge.spaces.pages') }}</span>
           </div>
-          <div class="space-desc">{{ s.description || '—' }}</div>
-          <div class="space-footer">
-            <span class="stat"><el-icon><Document /></el-icon>{{ s.page_count }} {{ t('knowledge.spaces.pages') }}</span>
-          </div>
-        </el-card>
-      </el-col>
-    </el-row>
-
-    <!-- 公开空间 -->
-    <div class="group-title" v-if="publicSpaces.length">{{ t('knowledge.spaces.publicGroup') }}</div>
-    <el-row :gutter="16" v-if="publicSpaces.length">
-      <el-col v-for="s in publicSpaces" :key="s.id" :xs="24" :sm="12" :md="8" :lg="6">
-        <el-card shadow="hover" class="space-card public" @click="openPages(s)">
-          <div class="space-head">
-            <div class="space-icon public"><el-icon :size="20"><Collection /></el-icon></div>
-            <div class="space-meta">
-              <div class="space-name">{{ s.name }}</div>
-              <el-tag size="small" type="success" effect="plain" round>{{ t('knowledge.spaces.publicTag') }}</el-tag>
-            </div>
-          </div>
-          <div class="space-desc">{{ s.description || '—' }}</div>
-          <div class="space-footer">
-            <span class="stat"><el-icon><Document /></el-icon>{{ s.page_count }} {{ t('knowledge.spaces.pages') }}</span>
-            <el-button v-if="s.owned" size="small" type="primary" plain round @click.stop="openUpload(s)">
-              {{ t('knowledge.spaces.uploadDoc') }}
-            </el-button>
-          </div>
-        </el-card>
-      </el-col>
-    </el-row>
-
-    <!-- 新建空间 -->
-    <el-dialog v-model="createVisible" :title="t('knowledge.spaces.create')" width="420px">
-      <el-form label-position="top">
-        <el-form-item :label="t('knowledge.spaces.name')">
-          <el-input v-model="newName" :placeholder="t('knowledge.spaces.namePlaceholder')" maxlength="100" />
-        </el-form-item>
-        <el-form-item :label="t('knowledge.spaces.desc')">
-          <el-input v-model="newDesc" type="textarea" :rows="2" :placeholder="t('knowledge.spaces.descPlaceholder')" maxlength="500" />
-        </el-form-item>
-        <el-form-item v-if="canCreatePublic" :label="t('knowledge.spaces.visibility')">
-          <el-radio-group v-model="newVisibility">
-            <el-radio label="private">{{ t('knowledge.spaces.visibilityPrivate') }}</el-radio>
-            <el-radio label="shared">{{ t('knowledge.spaces.visibilityShared') }}</el-radio>
-            <el-radio label="public">{{ t('knowledge.spaces.visibilityPublic') }}</el-radio>
-          </el-radio-group>
-          <div v-if="newVisibility === 'public'" class="visibility-hint">
-            {{ t('knowledge.spaces.visibilityPublicHint') }}
-          </div>
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="createVisible = false">{{ t('common.action.cancel') }}</el-button>
-        <el-button type="primary" :loading="creating" @click="handleCreate">{{ t('common.action.confirm') }}</el-button>
-      </template>
-    </el-dialog>
-
-    <!-- 上传文档 -->
-    <el-dialog v-model="uploadVisible" :title="t('knowledge.spaces.uploadTitle')" width="560px">
-      <el-form label-position="top">
-        <el-form-item :label="t('knowledge.spaces.docTitle')">
-          <el-input v-model="docTitle" maxlength="200" />
-        </el-form-item>
-        <el-form-item :label="t('knowledge.spaces.docContent')">
-          <el-input v-model="docContent" type="textarea" :rows="10" />
-        </el-form-item>
-        <el-form-item :label="t('knowledge.spaces.docUrl')">
-          <el-input v-model="docUrl" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="uploadVisible = false">{{ t('common.action.cancel') }}</el-button>
-        <el-button type="primary" :loading="uploading" @click="handleUpload">
-          {{ uploading ? t('knowledge.spaces.uploading') : t('common.action.confirm') }}
-        </el-button>
-      </template>
-    </el-dialog>
-
-    <!-- 成员管理（共享空间） -->
-    <el-dialog v-model="membersVisible" :title="t('knowledge.spaces.membersTitle')" width="520px">
-      <div class="member-add">
-        <el-input v-model="newMemberId" style="width: 160px" :placeholder="t('knowledge.spaces.memberId')" />
-        <el-select v-model="newMemberRole" style="width: 120px">
-          <el-option :label="t('knowledge.spaces.roleReader')" value="reader" />
-          <el-option :label="t('knowledge.spaces.roleWriter')" value="writer" />
-        </el-select>
-        <el-button size="small" type="primary" @click="handleAddMember">{{ t('knowledge.spaces.addMember') }}</el-button>
+        </div>
       </div>
-      <el-table :data="members" v-loading="membersLoading" size="small">
-        <el-table-column prop="name" :label="t('knowledge.spaces.memberName')" min-width="140" />
-        <el-table-column :label="t('knowledge.spaces.memberRole')" width="100" align="center">
-          <template #default="{ row }">
-            <el-tag size="small" :type="row.role === 'writer' ? 'warning' : 'info'" effect="plain" round>
-              {{ row.role === 'writer' ? t('knowledge.spaces.roleWriter') : t('knowledge.spaces.roleReader') }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column :label="t('knowledge.spaces.memberActions')" width="90" align="center">
-          <template #default="{ row }">
-            <el-button link size="small" type="danger" @click="handleRemoveMember(row)">{{ t('common.action.delete') }}</el-button>
-          </template>
-        </el-table-column>
-        <template #empty>
-          <el-empty :description="t('knowledge.spaces.memberEmpty')" :image-size="60" />
-        </template>
-      </el-table>
-      <p class="member-tip">{{ t('knowledge.spaces.memberTip') }}</p>
-    </el-dialog>
+
+      <el-tabs v-model="activeTab" class="detail-tabs">
+        <el-tab-pane :label="t('knowledge.spaces.tabDocs')" name="docs">
+          <DocsTab
+            v-if="activeTab === 'docs'"
+            :space-id="currentSpace.id"
+            :can-write="canWrite"
+            @refresh="refreshAll"
+            @goto-page="gotoPagesTab"
+          />
+        </el-tab-pane>
+        <el-tab-pane :label="t('knowledge.spaces.tabPages')" name="pages">
+          <PagesTab
+            v-if="activeTab === 'pages'"
+            ref="pagesTabRef"
+            :space-id="currentSpace.id"
+            :can-edit="canWrite"
+            :can-publish="canWrite"
+            :can-promote="currentSpace.my_role === 'owner' && currentSpace.visibility !== 'public'"
+            @refresh="refreshAll"
+          />
+        </el-tab-pane>
+        <el-tab-pane v-if="currentSpace.visibility === 'shared'" :label="t('knowledge.spaces.tabMembers')" name="members">
+          <MembersTab v-if="activeTab === 'members'" :space-id="currentSpace.id" :can-manage="currentSpace.my_role === 'owner'" />
+        </el-tab-pane>
+      </el-tabs>
+    </template>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Collection, Document, Folder, Plus } from '@element-plus/icons-vue'
+import { ArrowLeft, Collection, Document, Folder, Plus, Right, User } from '@element-plus/icons-vue'
 
-import { addKbSpaceMember, createKbSpace, getKbSpaceMembers, getKbSpaces, removeKbSpaceMember, uploadKbDoc } from '@/api'
+import { createKbSpace, getKbSpaceDocs, getKbSpaces } from '@/api'
 import { useUserStore } from '@/stores/user'
+import DocsTab from './components/DocsTab.vue'
+import MembersTab from './components/MembersTab.vue'
+import PagesTab from './components/PagesTab.vue'
 
 const { t } = useI18n()
+const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
 
@@ -190,43 +198,61 @@ const newName = ref('')
 const newDesc = ref('')
 const newVisibility = ref('private')
 const creating = ref(false)
-const uploadVisible = ref(false)
-const uploadSpace = ref<any>(null)
-const docTitle = ref('')
-const docContent = ref('')
-const docUrl = ref('')
-const uploading = ref(false)
-const membersVisible = ref(false)
-const membersLoading = ref(false)
-const members = ref<any[]>([])
-const memberSpace = ref<any>(null)
-const newMemberId = ref('')
-const newMemberRole = ref('reader')
+const activeTab = ref('docs')
+const spaceSummary = ref<any>(null)
+const pagesTabRef = ref<any>(null)
 
 const ownedSpaces = computed(() => spaces.value.filter((s) => s.owned && s.visibility !== 'public'))
 const sharedSpaces = computed(() => spaces.value.filter((s) => !s.owned && s.visibility === 'shared'))
 const publicSpaces = computed(() => spaces.value.filter((s) => s.visibility === 'public'))
 const canCreatePublic = computed(() => userStore.hasPermission('knowledge_base:promotion:review'))
 
+const currentSpaceId = computed(() => Number(route.query.space || 0) || null)
+const currentSpace = computed(() =>
+  currentSpaceId.value ? spaces.value.find((s) => s.id === currentSpaceId.value) ?? null : null,
+)
+const canWrite = computed(() => ['owner', 'writer'].includes(currentSpace.value?.my_role))
+
+function visibilityLabel(v: string): string {
+  const map: Record<string, string> = {
+    private: t('knowledge.spaces.privateTag'),
+    shared: t('knowledge.spaces.sharedTag'),
+    public: t('knowledge.spaces.publicTag'),
+  }
+  return map[v] ?? v
+}
+
 async function fetchSpaces() {
   try {
     const res: any = await getKbSpaces()
     spaces.value = res?.items ?? []
-  } catch (e: any) {
-    /* 错误提示由 request 拦截器统一展示（含可读化文案） */
-  }
+  } catch { /* 拦截器已提示 */ }
 }
 
-function openPages(space: any) {
-  router.push({ path: '/knowledge-base/pages', query: { space_id: space.id } })
+async function fetchSummary() {
+  if (!currentSpaceId.value) return
+  try {
+    const res: any = await getKbSpaceDocs(currentSpaceId.value)
+    spaceSummary.value = res?.space ?? null
+  } catch { /* 拦截器已提示 */ }
 }
 
-function openUpload(space: any) {
-  uploadSpace.value = space
-  docTitle.value = ''
-  docContent.value = ''
-  docUrl.value = ''
-  uploadVisible.value = true
+function openSpace(s: any) {
+  router.push({ query: { ...route.query, space: s.id } })
+}
+
+function backToList() {
+  router.push({ query: { ...route.query, space: undefined } })
+}
+
+async function refreshAll() {
+  await Promise.all([fetchSpaces(), fetchSummary()])
+}
+
+function gotoPagesTab(pageId: number) {
+  activeTab.value = 'pages'
+  // 等 PagesTab 挂载后跳到指定词条
+  setTimeout(() => pagesTabRef.value?.gotoPage(pageId), 50)
 }
 
 async function handleCreate() {
@@ -247,95 +273,19 @@ async function handleCreate() {
   }
 }
 
-async function openMembers(space: any) {
-  memberSpace.value = space
-  membersVisible.value = true
-  newMemberId.value = ''
-  newMemberRole.value = 'reader'
-  fetchMembers()
-}
+watch(currentSpaceId, () => {
+  activeTab.value = 'docs'
+  spaceSummary.value = null
+  if (currentSpaceId.value) fetchSummary()
+})
 
-async function fetchMembers() {
-  if (!memberSpace.value) return
-  membersLoading.value = true
-  try {
-    const res: any = await getKbSpaceMembers(memberSpace.value.id)
-    members.value = res?.items ?? []
-  } catch { /* 拦截器已提示 */ } finally {
-    membersLoading.value = false
-  }
-}
-
-async function handleAddMember() {
-  if (!memberSpace.value || !newMemberId.value.trim()) return
-  try {
-    await addKbSpaceMember(memberSpace.value.id, {
-      user_id: Number(newMemberId.value.trim()),
-      role: newMemberRole.value,
-    })
-    ElMessage.success(t('knowledge.spaces.memberSaved'))
-    newMemberId.value = ''
-    fetchMembers()
-  } catch { /* 拦截器已提示 */ }
-}
-
-async function handleRemoveMember(row: any) {
-  if (!memberSpace.value) return
-  try {
-    await removeKbSpaceMember(memberSpace.value.id, row.user_id)
-    ElMessage.success(t('knowledge.spaces.memberRemoved'))
-    fetchMembers()
-  } catch { /* 拦截器已提示 */ }
-}
-
-async function handleUpload() {
-  if (!uploadSpace.value) return
-  if (!docTitle.value.trim() || docContent.value.trim().length < 40) {
-    ElMessage.warning(t('knowledge.spaces.needDoc'))
-    return
-  }
-  uploading.value = true
-  try {
-    await uploadKbDoc(uploadSpace.value.id, {
-      title: docTitle.value.trim(),
-      content: docContent.value,
-      url: docUrl.value.trim() || undefined,
-      source_type: 'upload',
-    })
-    ElMessage.success(t('knowledge.spaces.uploaded'))
-    uploadVisible.value = false
-    fetchSpaces()
-  } catch (e: any) {
-    /* 错误提示由 request 拦截器统一展示（含可读化文案） */
-  } finally {
-    uploading.value = false
-  }
-}
-
-onMounted(fetchSpaces)
+onMounted(() => {
+  fetchSpaces()
+  if (currentSpaceId.value) fetchSummary()
+})
 </script>
 
 <style scoped>
-.member-add {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-
-.member-tip {
-  margin: 12px 0 0;
-  font-size: 12px;
-  line-height: 1.6;
-  color: var(--el-text-color-secondary);
-}
-
-.visibility-hint {
-  margin-top: 6px;
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--el-text-color-secondary);
-}
-
 .page-header {
   display: flex;
   align-items: flex-start;
@@ -382,6 +332,11 @@ onMounted(fetchSpaces)
   border-radius: 10px;
   color: var(--el-color-primary);
   background: var(--el-color-primary-light-9);
+}
+
+.space-icon.shared {
+  color: var(--el-color-warning);
+  background: var(--el-color-warning-light-9);
 }
 
 .space-icon.public {
@@ -446,5 +401,82 @@ onMounted(fetchSpaces)
   margin-top: 6px;
   font-size: 13px;
   color: var(--el-text-color-secondary);
+}
+
+.visibility-hint {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--el-text-color-secondary);
+}
+
+/* 详情视图 */
+.detail-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.detail-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  flex: 1;
+}
+
+.detail-title-meta {
+  min-width: 0;
+}
+
+.detail-title-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.detail-title-line h2 {
+  margin: 0;
+  font-size: 18px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.detail-desc {
+  margin: 2px 0 0;
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.detail-stats {
+  display: flex;
+  gap: 24px;
+}
+
+.stat-block {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.stat-num {
+  font-size: 20px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--el-color-primary);
+}
+
+.stat-label {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.detail-tabs :deep(.el-tabs__header) {
+  margin-bottom: 14px;
 }
 </style>

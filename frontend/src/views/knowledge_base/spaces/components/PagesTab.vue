@@ -1,15 +1,5 @@
 <template>
-  <div class="kb-pages-page">
-    <div class="page-header">
-      <div>
-        <h2>{{ t('knowledge.pages.title') }}</h2>
-        <p class="text-muted">{{ t('knowledge.pages.subtitle') }}</p>
-      </div>
-      <el-select v-model="spaceId" style="width: 220px" @change="onSpaceChange" :placeholder="t('knowledge.spaces.noSpaceSelected')">
-        <el-option v-for="s in spaces" :key="s.id" :value="s.id" :label="`${s.owned ? '' : '[公]'}${s.name}`" />
-      </el-select>
-    </div>
-
+  <div class="pages-tab">
     <!-- 状态筛选 -->
     <div class="type-filter">
       <button v-for="st in statusTabs" :key="st.key" class="type-chip" :class="{ active: status === st.key }" @click="switchStatus(st.key)">
@@ -131,9 +121,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Link } from '@element-plus/icons-vue'
 import { marked } from 'marked'
@@ -141,11 +130,11 @@ import DOMPurify from 'dompurify'
 
 import { getKbPage, getKbPageRevisions, getKbPages, getKbSpaces, publishKbPage, submitKbPromotion, updateKbPage } from '@/api'
 
-const { t } = useI18n()
-const route = useRoute()
+const props = defineProps<{ spaceId: number; canEdit: boolean; canPublish: boolean; canPromote: boolean }>()
+const emit = defineEmits<{ (e: 'refresh'): void }>()
 
-const spaces = ref<any[]>([])
-const spaceId = ref<number | null>(null)
+const { t } = useI18n()
+
 const status = ref('all')
 const pages = ref<any[]>([])
 const total = ref(0)
@@ -161,6 +150,7 @@ const saving = ref(false)
 const promoteVisible = ref(false)
 const promoteTarget = ref<number | null>(null)
 const promoteNote = ref('')
+const publicSpaces = ref<any[]>([])
 
 const statusTabs = computed(() => [
   { key: 'all', label: t('knowledge.pages.statusAll') },
@@ -169,12 +159,6 @@ const statusTabs = computed(() => [
   { key: 'live', label: t('knowledge.pages.statusLive') },
   { key: 'archived', label: t('knowledge.pages.statusArchived') },
 ])
-
-const currentSpace = computed(() => spaces.value.find((s) => s.id === spaceId.value))
-const canEdit = computed(() => currentSpace.value?.owned)
-const canPublish = computed(() => currentSpace.value?.owned)
-const canPromote = computed(() => currentSpace.value?.owned && currentSpace.value?.visibility !== 'public')
-const publicSpaces = computed(() => spaces.value.filter((s) => s.visibility === 'public'))
 
 const renderedBody = computed(() => {
   if (!selected.value?.body_md) return ''
@@ -198,23 +182,16 @@ function statusLabel(s: string): string {
 
 async function fetchSpaces() {
   const res: any = await getKbSpaces()
-  spaces.value = res?.items ?? []
-  const qid = Number(route.query.space_id || 0)
-  if (qid && spaces.value.some((s) => s.id === qid)) {
-    spaceId.value = qid
-  } else {
-    spaceId.value = spaces.value[0]?.id ?? null
-  }
-  if (spaceId.value) fetchPages()
+  publicSpaces.value = (res?.items ?? []).filter((s: any) => s.visibility === 'public')
 }
 
 async function fetchPages() {
-  if (!spaceId.value) return
+  if (!props.spaceId) return
   loading.value = true
   try {
     const params: any = { page: pageNum.value, page_size: pageSize }
     if (status.value !== 'all') params.status = status.value
-    const res: any = await getKbPages(spaceId.value, params)
+    const res: any = await getKbPages(props.spaceId, params)
     pages.value = res?.items ?? []
     total.value = res?.total ?? 0
     if (pages.value.length && !selected.value) await selectPage(pages.value[0])
@@ -239,12 +216,6 @@ function switchStatus(key: string) {
   fetchPages()
 }
 
-function onSpaceChange() {
-  selected.value = null
-  pageNum.value = 1
-  fetchPages()
-}
-
 function startEdit() {
   editBody.value = selected.value?.body_md ?? ''
   editVisible.value = true
@@ -263,7 +234,6 @@ async function handleSave() {
     await selectPage(selected.value)
     fetchPages()
   } catch (e: any) {
-    // 乐观锁冲突给专用提示；其余错误由 request 拦截器统一展示（含可读化文案）
     if (e?.response?.status === 409) {
       ElMessage.error(t('knowledge.pages.expectedVersionConflict'))
     }
@@ -285,6 +255,7 @@ async function handlePublish(target: string) {
     ElMessage.success(t('knowledge.pages.published'))
     await selectPage(selected.value)
     fetchPages()
+    emit('refresh')
   } catch (e: any) {
     /* 错误提示由 request 拦截器统一展示（含可读化文案） */
   }
@@ -312,14 +283,17 @@ async function handlePromote() {
   }
 }
 
-watch(() => route.query.space_id, (v) => {
-  if (v && Number(v) !== spaceId.value) {
-    spaceId.value = Number(v)
-    fetchPages()
-  }
-})
+function gotoPage(pageId: number) {
+  const p = pages.value.find((x: any) => x.id === pageId)
+  if (p) selectPage(p)
+}
 
-onMounted(fetchSpaces)
+defineExpose({ refresh: fetchPages, gotoPage })
+
+onMounted(() => {
+  fetchSpaces()
+  fetchPages()
+})
 </script>
 
 <style scoped>
@@ -328,18 +302,6 @@ onMounted(fetchSpaces)
   font-size: 12px;
   line-height: 1.5;
   color: var(--el-text-color-secondary);
-}
-
-.page-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  margin-bottom: 16px;
-}
-
-.page-header h2 {
-  margin: 0 0 4px;
-  font-size: 20px;
 }
 
 .type-filter {
@@ -409,10 +371,7 @@ onMounted(fetchSpaces)
   border-bottom: 1px dashed var(--el-border-color-lighter);
 }
 
-.page-row:hover {
-  background: var(--el-color-primary-light-9);
-}
-
+.page-row:hover,
 .page-row.active {
   background: var(--el-color-primary-light-9);
 }

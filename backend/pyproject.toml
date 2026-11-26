@@ -28,6 +28,9 @@ dependencies = [
     "trafilatura>=2.0.0",
     "arxiv>=4.0.0",
     "pyalex>=0.15.0",
+    # knowledge_base 插件：文档上传解析（PDF/DOCX）
+    "pypdf>=5.0.0",
+    "python-docx>=1.1.0",
 ]
 
 [project.optional-dependencies]

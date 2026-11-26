@@ -45,17 +45,62 @@ async def seed_knowledge_base_data(db: AsyncSession) -> None:
         db.add(parent)
         await db.flush()
         logger.info("Created 'ApeCortex' top-level menu")
+    elif parent.name != "ApeCortex":
+        # N1 迁移：旧库存量顶级目录（如"AI 知识库"）改名 ApeCortex
+        parent.name = "ApeCortex"
+        parent.i18n_key = "menu.kb.label"
+        parent.icon = "Collection"
+        await db.flush()
+        logger.info(f"Migrated top-level menu name: {parent.name!r} → 'ApeCortex'")
 
-    # ── 2. 子菜单 + 按钮权限（P1 扩容）─────────────────
+    # ── 1.5 N1 菜单迁移：独立"词条管理"菜单并入"知识空间"──────────
+    # 旧库已存在 path=pages 的 C 菜单 → 删除该菜单行，其下 F 按钮（发布词条/编辑词条）
+    # 挂到"知识空间"菜单下；后续 menu_specs 会幂等补齐新结构。
+    old_pages_menu = next(
+        (m for m in (await db.execute(
+            select(Menu).where(
+                Menu.parent_id == parent.id, Menu.path == "pages", Menu.type == "C"
+            )
+        )).scalars().all()),
+        None,
+    )
+    if old_pages_menu is not None:
+        spaces_menu = next(
+            (m for m in (await db.execute(
+                select(Menu).where(
+                    Menu.parent_id == parent.id, Menu.path == "spaces", Menu.type == "C"
+                )
+            )).scalars().all()),
+            None,
+        )
+        children = list((await db.execute(
+            select(Menu).where(Menu.parent_id == old_pages_menu.id)
+        )).scalars().all())
+        for child in children:
+            if spaces_menu is not None:
+                child.parent_id = spaces_menu.id
+            else:
+                # 知识空间菜单尚未 seed：先临时挂顶级目录，specs 阶段再归位
+                child.parent_id = parent.id
+        await db.flush()
+        await db.delete(old_pages_menu)
+        await db.flush()
+        logger.info("Migrated: '词条管理' menu merged into '知识空间'")
+
+    # ── 2. 子菜单 + 按钮权限（N1 重构后结构）─────────
     # (name, parent_name, type, path, component, permission, icon, sort, i18n_key)
     menu_specs = [
+        ("知识中心", None, "C", "hub", "knowledge_base/hub/index",
+         "knowledge_base:hub:list", "Reading", 1, "menu.kb.hub"),
+        ("分类管理", "知识中心", "F", None, None, "knowledge_base:category:manage", None, 1, None),
         ("知识空间", None, "C", "spaces", "knowledge_base/spaces/index",
-         "knowledge_base:space:list", "Folder", 1, "menu.kb.spaces"),
+         "knowledge_base:space:list", "Folder", 2, "menu.kb.spaces"),
         ("新建空间", "知识空间", "F", None, None, "knowledge_base:space:create", None, 1, None),
-        ("词条管理", None, "C", "pages", "knowledge_base/pages/index",
-         "knowledge_base:page:list", "Document", 2, "menu.kb.pages"),
-        ("发布词条", "词条管理", "F", None, None, "knowledge_base:page:publish", None, 1, None),
-        ("编辑词条", "词条管理", "F", None, None, "knowledge_base:page:edit", None, 2, None),
+        ("上传文档", "知识空间", "F", None, None, "knowledge_base:doc:upload", None, 2, None),
+        ("删除文档", "知识空间", "F", None, None, "knowledge_base:doc:delete", None, 3, None),
+        ("发布词条", "知识空间", "F", None, None, "knowledge_base:page:publish", None, 4, None),
+        ("编辑词条", "知识空间", "F", None, None, "knowledge_base:page:edit", None, 5, None),
+        ("编译文档", "知识空间", "F", None, None, "knowledge_base:doc:compile", None, 6, None),
         ("晋升审核", None, "C", "promotions", "knowledge_base/promotions/index",
          "knowledge_base:promotion:review", "Stamp", 3, "menu.kb.promotions"),
         ("提交晋升", "晋升审核", "F", None, None, "knowledge_base:promotion:submit", None, 1, None),
@@ -109,6 +154,22 @@ async def seed_knowledge_base_data(db: AsyncSession) -> None:
 
     if created_menus:
         logger.info(f"Created {len(created_menus)} knowledge_base menus")
+
+    # ── 2.5 默认分类（N1 知识中心开箱体验：空库预置三个一级分类）──
+    from src.plugins.builtin.knowledge_base.models import KbCategory
+
+    cat_count = (await db.execute(
+        select(KbCategory).limit(1)
+    )).scalars().first()
+    if cat_count is None:
+        for name, icon, sort in (
+            ("技术教程", "Monitor", 1),
+            ("行业报告", "DataAnalysis", 2),
+            ("产品资料", "Goods", 3),
+        ):
+            db.add(KbCategory(name=name, icon=icon, sort=sort))
+        await db.flush()
+        logger.info("Seeded 3 default knowledge hub categories")
 
     # ── 3. 绑定到 admin 角色（幂等）──────────────────
     admin_result = await db.execute(select(Role).where(Role.code == "admin"))

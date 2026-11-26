@@ -114,6 +114,29 @@ PROMOTION_STATUS = ("draft", "submitted", "approved", "rejected", "withdrawn")
 EDIT_SOURCES = ("pipeline", "agent", "user", "revert")
 
 
+class KbCategory(IDMixin, TimestampMixin, PluginBase):
+    """公开库分类（N1 知识中心）——管理员维护的分类树（最多两级）。
+
+    - 一级分类：parent_id 为空；二级分类：挂一级下
+    - KbSpace(visibility=public) 通过 category_id 挂到分类（可空=未分类）
+    - 删除分类时：其下公开空间的 category_id 置空（不删空间），子分类上提为一级
+    """
+
+    __tablename__ = "kb_category"
+
+    name: Mapped[str] = mapped_column(String(50), nullable=False, comment="分类名")
+    parent_id: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, index=True, comment="父分类（空=一级）"
+    )
+    icon: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="Folder", comment="图标名（Element Plus）"
+    )
+    sort: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="排序值")
+
+    def __repr__(self) -> str:
+        return f"<KbCategory {self.id} {self.name}>"
+
+
 class KbSpace(IDMixin, TimestampMixin, PluginBase):
     """知识库空间（P1）。
 
@@ -121,6 +144,7 @@ class KbSpace(IDMixin, TimestampMixin, PluginBase):
     - shared 空间：成员可读，writer 可写；非成员不可见（SQL 层成员连接过滤）
     - public 空间：全员可读（AI 双通道召回），写入仅限晋升流或空间维护者（API 硬校验）
     - owner_user_id 语义自 user_id（规划 10.2 节）
+    - category_id：公开空间的所属分类（N1 知识中心；空=未分类）
     """
 
     __tablename__ = "kb_space"
@@ -141,6 +165,9 @@ class KbSpace(IDMixin, TimestampMixin, PluginBase):
     )
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="active", comment="active/archived"
+    )
+    category_id: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, index=True, comment="公开库分类（N1 知识中心；空=未分类）"
     )
 
     def __repr__(self) -> str:

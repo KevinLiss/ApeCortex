@@ -320,3 +320,24 @@ export const getKbPendingPublish = () => request.get('/knowledge-base/promotions
 export const getKbPublicKeys = () => request.get('/knowledge-base/public-keys')
 export const createKbPublicKey = (data: any) => request.post('/knowledge-base/public-keys', data)
 export const deleteKbPublicKey = (id: number) => request.delete(`/knowledge-base/public-keys/${id}`)
+
+// ---- Knowledge Base N1：知识中心 / 文档管理 ----
+export const getKbCategories = () => request.get('/knowledge-base/hub/categories')
+export const createKbCategory = (data: any) => request.post('/knowledge-base/hub/categories', data)
+export const updateKbCategory = (id: number, data: any) => request.put(`/knowledge-base/hub/categories/${id}`, data)
+export const deleteKbCategory = (id: number) => request.delete(`/knowledge-base/hub/categories/${id}`)
+export const assignKbSpaceCategory = (spaceId: number, categoryId: number | null) => request.put(`/knowledge-base/hub/spaces/${spaceId}/category`, { category_id: categoryId })
+export const getKbHubSpaces = (params?: any) => request.get('/knowledge-base/hub/spaces', { params })
+export const getKbHubPages = (params?: any) => request.get('/knowledge-base/hub/pages', { params })
+export const getKbHubPage = (pageId: number) => request.get(`/knowledge-base/hub/pages/${pageId}`)
+export const getKbSpaceDocs = (spaceId: number) => request.get(`/knowledge-base/spaces/${spaceId}/docs`)
+export const getKbSpaceDoc = (spaceId: number, docId: number) => request.get(`/knowledge-base/spaces/${spaceId}/docs/${docId}`)
+export const uploadKbDocFile = (spaceId: number, file: File) => {
+  const form = new FormData()
+  form.append('file', file)
+  return request.post(`/knowledge-base/spaces/${spaceId}/docs/upload`, form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+}
+export const deleteKbDoc = (spaceId: number, docId: number) => request.delete(`/knowledge-base/spaces/${spaceId}/docs/${docId}`)
+export const compileKbDoc = (spaceId: number, docId: number) => request.post(`/knowledge-base/spaces/${spaceId}/docs/${docId}/compile`)
