@@ -12,6 +12,12 @@
 
 成本纪律：一次聊天完成 = 恰好 1 次 LLM 调用（提取）；画像重写按阈值触发另算。
 全程 try/except 包裹，任何失败只记日志，绝不影响聊天主流程。
+
+回声防线（2026-11-26 踩坑修复）：
+- 提取语料仅取用户发言——助手回答里必然夹带 kb_query 返回的词条/画像内容，
+  若一并送入，机器知识会被反复吸收成“用户事实”（实测：用户未问过 ApeAdmin，
+  记忆库里却长出 3 条插件文档事实，全部产自助手对 kb_query 结果的复述）。
+- 画像重写结论必须标注依据记忆#id，程序校验后丢弃无支撑行（防 LLM 编造身份）。
 """
 import asyncio
 import hashlib
@@ -79,7 +85,7 @@ def _build_extract_user_prompt(transcript: str, known_memories: list[str]) -> st
     return f"""【已知记忆】
 {known}
 
-【对话记录】（最近 {_EXTRACT_CONTEXT_MESSAGES} 条，最后一条为刚完成的回复）
+【用户发言】（仅用户消息；助手回复已过滤——只从用户亲口说的内容中提取）
 {transcript}
 
 请提取其中值得长期记住的新知识。只输出 JSON。"""
@@ -90,10 +96,13 @@ _PROFILE_SYSTEM_PROMPT = """你是用户画像生成器。基于记忆条目库�
 【要求】
 - 输出纯 Markdown（不要代码围栏），使用以下分节结构（无内容的节可省略）：
   ## 基本信息 / ## 偏好 / ## 习惯 / ## 长期事实 / ## 近期关注
-- 每条结论后用 `(置信度: 高/中/低)` 标注
-- 优先采纳置信度高、证据多的记忆；失效（invalid）记忆视为历史，仅当演化脉络有价值时一句话提及
-- 与现有画像冲突时，以新记忆为准（演化）
-- 60~120 行以内；客观陈述，禁止臆测
+- 每条结论必须是记忆条目库中真实条目的转述/合并，行尾必须标注依据：
+  `- 结论 (置信度: 高/中/低，依据: 记忆#12)`（多个依据：记忆#12,#30）
+- 禁止写记忆条目库中没有依据的结论——哪怕看起来合理（宁缺毋滥）
+- 禁止元评论：不要出现“再次得到印证”“无演化冲突”“与现有画像一致”等
+  对记忆库/画像本身的描述，只写用户的事实
+- 失效（invalid）记忆仅当演化脉络有价值时一句话提及，同样需标注依据
+- 60 行以内；客观陈述
 """
 
 
@@ -268,6 +277,86 @@ async def _call_llm_json(system: str, user: str, max_tokens: int, temperature: f
         return None
 
 
+# ---------------------------------------------------------------- 画像 grounding 校验
+
+# 行内「依据: 记忆#12,#30」标注（校验通过后剥掉，不落库，保持画像可读）
+_GROUNDING_RE = re.compile(r"[，,]?\s*依据[:：]\s*(?:记忆)?#?\s*[\d,，、\s]*")
+_GROUNDING_IDS_RE = re.compile(r"依据[:：]\s*(?:记忆)?#?\s*([\d,，、\s]+)")
+# 结论行与被引记忆的最低覆盖度（行文 shingle 被记忆内容覆盖的比例）
+_GROUNDING_COVERAGE = 0.35
+
+
+def _strip_grounding(line: str) -> str:
+    """去掉行内的『依据: 记忆#…』片段（置信度标注保留）。"""
+    line = _GROUNDING_RE.sub("", line)
+    return re.sub(r"\(\s*\)|（\s*）", "", line).rstrip()
+
+
+def _prune_empty_sections(md: str) -> str:
+    """删掉过滤后没有正文的空分节，避免画像里留下光秃秃的标题。"""
+    out: list[str] = []
+
+    def flush(heading: str | None, lines: list[str]) -> None:
+        if heading is None or any(line.strip() for line in lines):
+            if heading is not None:
+                out.append(heading)
+            out.extend(lines)
+        lines.clear()
+
+    heading: str | None = None
+    lines: list[str] = []
+    for line in md.splitlines():
+        if line.strip().startswith("#"):
+            flush(heading, lines)
+            heading = line
+        else:
+            lines.append(line)
+    flush(heading, lines)
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(out)).strip()
+
+
+def _filter_profile_grounding(md: str, mem_by_id: dict[int, str]) -> tuple[str, list[str], list[str]]:
+    """画像重写的 grounding 校验（防 LLM 编造——2026-11-26 实测画像里长出
+    记忆库中不存在的「独立开发者维护 ApeAdmin 产品线」）。
+
+    规则：每条结论行必须标注 `依据: 记忆#id`，且行文主体须被被引记忆内容覆盖
+    （shingle 覆盖率 ≥ _GROUNDING_COVERAGE）。无标注、引用不存在的记忆、
+    或行文与被引内容明显无关的行一律丢弃；标题/分隔线/空行原样保留，
+    但结论全被丢弃的分节会整体删掉（不留空标题）。
+
+    返回 (清洗后的 markdown, 保留的结论行, 丢弃行)。
+    """
+    kept: list[str] = []        # 仅结论行（不含标题/分隔线），调用方据此判断是否全灭
+    body_lines: list[str] = []  # 结论 + 标题/空行，用于拼最终 markdown
+    dropped: list[str] = []
+    for line in md.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith(("#", "---", "***")):
+            body_lines.append(line)
+            continue
+        m = _GROUNDING_IDS_RE.search(stripped)
+        if not m:
+            dropped.append(stripped)
+            continue
+        ids = [int(x) for x in re.findall(r"\d+", m.group(1))]
+        if not ids or any(i not in mem_by_id for i in ids):
+            dropped.append(stripped)
+            continue
+        # 行文主体：去标注、去列表符，只留结论文字
+        body = _strip_grounding(stripped).lstrip("-•* ").strip()
+        body = re.sub(r"[（(][^（）()]*[）)]", "", body).strip()
+        support = _shingles(" ".join(mem_by_id[i] for i in ids))
+        body_tokens = _shingles(body)
+        coverage = (len(body_tokens & support) / len(body_tokens)) if body_tokens else 0.0
+        if len(body) >= 4 and coverage >= _GROUNDING_COVERAGE:
+            cleaned = _strip_grounding(line)
+            kept.append(cleaned)
+            body_lines.append(cleaned)
+        else:
+            dropped.append(stripped)
+    return _prune_empty_sections("\n".join(body_lines)), kept, dropped
+
+
 # ---------------------------------------------------------------- 主管线
 
 async def extract_and_store(
@@ -281,20 +370,23 @@ async def extract_and_store(
     from src.plugins.builtin.knowledge_base.models import KbMemoryItem
 
     async with SessionLocal() as db:
-        # 1. 组装对话记录（服务端事实源——runner 持久化后的最近消息，含刚存入的 assistant 回复）
+        # 1. 组装提取语料：只取用户发言（回声防线——助手回复含 kb_query 返回的
+        #    词条/画像内容，混入语料会把机器知识回灌成“用户记忆”）
         if transcript_override:
+            # 显式语料（测试/补偿入口）由调用方自担内容责任
             transcript = transcript_override
         else:
             stmt = (
                 select(ChatMessageModel)
                 .where(ChatMessageModel.session_id == session_id)
                 .order_by(ChatMessageModel.id.desc())
-                .limit(_EXTRACT_CONTEXT_MESSAGES)
+                .limit(_EXTRACT_CONTEXT_MESSAGES * 4)
             )
             rows = list((await db.execute(stmt)).scalars().all())
             rows.reverse()
+            user_msgs = [m.content for m in rows if m.role == "user" and m.content.strip()]
             transcript = "\n".join(
-                f"{'用户' if m.role == 'user' else '助手'}: {m.content}" for m in rows if m.content.strip()
+                f"用户: {c}" for c in user_msgs[-_EXTRACT_CONTEXT_MESSAGES:]
             )
         if len(transcript.strip()) < 20:
             return 0  # 太短不值得提取（省一次 LLM 调用）
@@ -415,7 +507,7 @@ async def _rewrite_profile_in_session(db, user_id: int) -> bool:
     ).scalars().first()
 
     mem_lines = "\n".join(
-        f"- [{m.mem_type}] {m.content} (置信度{m.confidence:.2f}, 证据{m.source_count}"
+        f"- 记忆#{m.id} [{m.mem_type}] {m.content} (置信度{m.confidence:.2f}, 证据{m.source_count}"
         + (", 已失效" if m.invalid_at is not None else "")
         + ")"
         for m in memories
@@ -431,13 +523,22 @@ async def _rewrite_profile_in_session(db, user_id: int) -> bool:
     if raw is None:
         return False
     md = _strip_code_fences(raw)
+    md, kept, dropped = _filter_profile_grounding(md, {m.id: m.content for m in memories})
+    if not kept:
+        logger.warning(f"[KnowledgeBase] user={user_id} 画像重写被否决：无任何有依据的结论")
+        return False
+    if dropped:
+        logger.info(
+            f"[KnowledgeBase] user={user_id} 画像重写丢弃 {len(dropped)} 条无依据结论: "
+            f"{dropped[:3]}"
+        )
     if profile is None:
         profile = KbProfile(user_id=user_id, profile_md=md, version=1)
         db.add(profile)
     else:
         profile.profile_md = md
         profile.version += 1
-    logger.info(f"[KnowledgeBase] user={user_id} 画像已重写")
+    logger.info(f"[KnowledgeBase] user={user_id} 画像已重写 (保留 {len(kept)} 条结论)")
     return True
 
 

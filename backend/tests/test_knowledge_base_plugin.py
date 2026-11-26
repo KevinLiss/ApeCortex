@@ -178,11 +178,11 @@ async def test_profile_rewrite_bumps_version(kb_env, mock_llm):
         user_id=1, session_id=1, transcript_override="用户: 我的职业是独立开发者，主要做后台管理框架产品。"
     )
 
-    mock_llm.response = "## 基本信息\n- 独立开发者\n"
+    mock_llm.response = "## 基本信息\n- 独立开发者 (置信度: 高，依据: 记忆#1)\n"
     ok1 = await memory_pipeline.rewrite_profile(1)
     assert ok1
 
-    mock_llm.response = "## 基本信息\n- 独立开发者（已升级 v2）\n"
+    mock_llm.response = "## 基本信息\n- 独立开发者（已升级 v2）(置信度: 高，依据: 记忆#1)\n"
     ok2 = await memory_pipeline.rewrite_profile(1)
     assert ok2
 
@@ -195,6 +195,99 @@ async def test_profile_rewrite_bumps_version(kb_env, mock_llm):
 async def test_profile_rewrite_without_memories_fails(kb_env, mock_llm):
     assert await memory_pipeline.rewrite_profile(1) is False
     assert mock_llm.calls == []  # 无记忆时省 LLM 调用
+
+
+async def test_profile_rewrite_drops_unsupported_lines(kb_env, mock_llm):
+    """画像 grounding：无依据/编造/元评论的行一律丢弃（回声防线）。"""
+    mock_llm.response = json.dumps({"memories": [
+        {"content": "用户的技术栈是 Vue3 和 FastAPI", "type": "fact"},
+    ]})
+    await memory_pipeline.extract_and_store(
+        user_id=1, session_id=1, transcript_override="用户: 我的技术栈是 Vue3 和 FastAPI。"
+    )
+
+    mock_llm.response = (
+        "## 基本信息\n"
+        "- 技术栈为 Vue3 + FastAPI (置信度: 高，依据: 记忆#1)\n"
+        "- 用户是独立开发者，维护 ApeAdmin 产品线 (置信度: 高，依据: 记忆#1)\n"
+        "- 无依据的一句话 (置信度: 高)\n"
+        "- 技术栈信息在记忆条目库中再次得到印证，无演化冲突 (置信度: 高，依据: 记忆#1)\n"
+    )
+    ok = await memory_pipeline.rewrite_profile(1)
+    assert ok
+
+    async with kb_env() as db:
+        profile = (await db.execute(select(KbProfile))).scalars().one()
+    assert "技术栈为 Vue3" in profile.profile_md          # 有依据且转述 → 保留
+    assert "独立开发者" not in profile.profile_md         # 与被引记忆不匹配 → 丢弃
+    assert "无依据的一句话" not in profile.profile_md     # 未标注依据 → 丢弃
+    assert "再次得到印证" not in profile.profile_md       # 元评论 → 丢弃
+    assert "依据" not in profile.profile_md               # 落库前剥掉依据标注
+
+
+async def test_profile_rewrite_vetoed_when_all_lines_unsupported(kb_env, mock_llm):
+    """结论全被 grounding 丢弃时应否决本次重写，而非落一份只剩标题的空画像。"""
+    mock_llm.response = json.dumps({"memories": [
+        {"content": "用户偏好深色主题", "type": "preference"},
+    ]})
+    await memory_pipeline.extract_and_store(
+        user_id=1, session_id=1, transcript_override="用户: 我一直更喜欢深色主题的界面，晚上写代码的时候看着比较舒服。"
+    )
+    mock_llm.response = "## 基本信息\n- 用户是独立开发者 (置信度: 高，依据: 记忆#1)\n"
+    assert await memory_pipeline.rewrite_profile(1) is False
+
+    async with kb_env() as db:
+        assert (await db.execute(select(KbProfile))).scalars().first() is None
+
+
+async def test_profile_prunes_empty_sections(kb_env, mock_llm):
+    """部分结论被丢弃时，其所在分节的空标题要一并删掉。"""
+    mock_llm.response = json.dumps({"memories": [
+        {"content": "用户偏好深色主题", "type": "preference"},
+    ]})
+    await memory_pipeline.extract_and_store(
+        user_id=1, session_id=1, transcript_override="用户: 我一直更喜欢深色主题的界面，晚上写代码的时候看着比较舒服。"
+    )
+    mock_llm.response = (
+        "## 基本信息\n"
+        "- 用户是独立开发者 (置信度: 高，依据: 记忆#1)\n"
+        "## 偏好\n"
+        "- 偏好深色主题 (置信度: 高，依据: 记忆#1)\n"
+    )
+    assert await memory_pipeline.rewrite_profile(1) is True
+
+    async with kb_env() as db:
+        md = (await db.execute(select(KbProfile))).scalars().one().profile_md
+    assert "偏好深色主题" in md
+    assert "基本信息" not in md      # 该节唯一结论无依据 → 整节删除
+    assert "\n\n\n" not in md
+
+
+async def test_extract_uses_user_messages_only(kb_env, mock_llm):
+    """回声循环防线：提取语料只含用户发言，助手复述的词条/画像内容绝不进入。"""
+    from src.models.ai import ChatMessageModel
+
+    mock_llm.response = json.dumps({"memories": []})
+    async with kb_env() as db:
+        db.add(ChatMessageModel(
+            session_id=7, role="user",
+            content="你看看我能调用哪些知识库，顺便说说你还记得我什么背景信息吧",
+        ))
+        db.add(ChatMessageModel(
+            session_id=7, role="assistant",
+            content="私有词条：ApeAdmin 的插件以 Python 包形式存放于 src/plugins/builtin 目录；"
+                    "已记录你的基本信息（独立开发者、维护 ApeAdmin 产品线）",
+        ))
+        await db.commit()
+
+    await memory_pipeline.extract_and_store(user_id=1, session_id=7, run_id=10)
+
+    assert mock_llm.calls, "语料足够长时应调用 LLM"
+    prompt = mock_llm.calls[0]
+    assert "你看看我能调用哪些知识库" in prompt   # 用户发言保留
+    assert "src/plugins/builtin" not in prompt    # 助手复述的词条内容被过滤
+    assert "独立开发者" not in prompt             # 画像回声被过滤
+    assert "助手:" not in prompt                  # 语料里不再出现助手发言
 
 
 # ---------------------------------------------------------------- search
