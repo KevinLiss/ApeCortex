@@ -209,8 +209,8 @@
             v-model="inputText"
             type="textarea"
             :rows="1"
-            :autosize="{ minRows: 1, maxRows: 6 }"
-            placeholder="输入消息，Enter 发送，Shift+Enter 换行"
+            :autosize="{ minRows: isMobile ? 2 : 1, maxRows: 6 }"
+            :placeholder="isMobile ? '输入消息…' : '输入消息，Enter 发送，Shift+Enter 换行'"
             resize="none"
             @keydown.enter.exact.prevent="sendMessage"
           />
@@ -223,67 +223,6 @@
                   <el-switch v-model="enableTools" size="small" />
                 </div>
               </el-tooltip>
-              <!-- 知识库配置（ApeCortex）：启用集合多选弹窗 -->
-              <el-popover
-                v-model:visible="kbPrefsVisible"
-                placement="top-start"
-                :width="320"
-                trigger="click"
-              >
-                <template #reference>
-                  <!-- 注意：reference 插槽必须是纯 DOM 元素；嵌 el-tooltip 会使
-                       popover 的点击触发绑定失效（真实鼠标点击打不开弹层）。
-                       hover 提示用原生 title 属性承担。 -->
-                  <div
-                    class="tools-toggle"
-                    :class="{ 'kb-active': kbOn }"
-                    title="知识库启用配置（知识中心与个人空间）"
-                  >
-                    <el-icon :size="14"><Collection /></el-icon>
-                    <span>知识库</span>
-                    <el-badge v-if="kbOn" is-dot class="kb-dot-badge" />
-                  </div>
-                </template>
-                <div class="kb-prefs-panel">
-                  <div class="kb-prefs-title">知识库启用配置</div>
-                  <div class="kb-prefs-row">
-                    <div>
-                      <div class="kb-prefs-label">知识中心</div>
-                      <div class="kb-prefs-tip">公共知识库（推送内容经 AI 甄选归类）</div>
-                    </div>
-                    <el-switch v-model="kbPrefs.include_hub" size="small" @change="saveKbPrefs" />
-                  </div>
-                  <div class="kb-prefs-row">
-                    <div>
-                      <div class="kb-prefs-label">我的知识空间</div>
-                      <div class="kb-prefs-tip">{{ spacesTip }}</div>
-                    </div>
-                    <el-switch :model-value="kbSpacesAll" size="small" @change="onAllSpacesChange" />
-                  </div>
-                  <div v-if="!kbSpacesAll && kbSpaces.length" class="kb-spaces-list">
-                    <el-checkbox-group v-model="kbPrefs.enabled_spaces" @change="saveKbPrefs">
-                      <el-checkbox v-for="sp in kbSpaces" :key="sp.id" :value="sp.id">
-                        {{ sp.name }}
-                      </el-checkbox>
-                    </el-checkbox-group>
-                  </div>
-                  <div class="kb-prefs-divider"></div>
-                  <div class="kb-prefs-row">
-                    <span class="kb-prefs-label">记忆召回</span>
-                    <el-switch v-model="kbPrefs.memory_enabled" size="small" @change="saveKbPrefs" />
-                  </div>
-                  <div class="kb-prefs-row">
-                    <div>
-                      <div class="kb-prefs-label">自动注入</div>
-                      <div class="kb-prefs-tip">每轮自动注入相关记忆与词条（消耗更多 token）</div>
-                    </div>
-                    <el-switch v-model="kbPrefs.auto_inject" size="small" @change="saveKbPrefs" />
-                  </div>
-                  <div class="kb-prefs-tip kb-prefs-foot">
-                    关闭自动注入时仍可用 kb_query 工具按需检索。
-                  </div>
-                </div>
-              </el-popover>
               <span class="char-count" v-if="inputText.length">{{ inputText.length }}</span>
               <!-- 会话操作（收纳进输入框） -->
               <template v-if="activeSessionId != null">
@@ -351,9 +290,6 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   getAllProviders,
   getChatSessionMessages,
-  getKbChatPrefs,
-  getKbSpaces,
-  putKbChatPrefs,
 } from '@/api'
 import { useAiChatStore } from '@/stores/aiChat'
 import { marked } from 'marked'
@@ -405,61 +341,6 @@ interface ChatSessionItem {
 
 const store = useAiChatStore()
 const router = useRouter()
-
-// 知识库偏好（ApeCortex）：启用集合模型 + 空间模式三态（周期三）
-const kbPrefsVisible = ref(false)
-const kbPrefs = ref<any>({
-  include_hub: true,
-  spaces_mode: 'all' as 'all' | 'custom',
-  enabled_spaces: [] as number[],
-  memory_enabled: true,
-  auto_inject: false,
-})
-const kbSpaces = ref<any[]>([])
-
-// 启用判定：hub 开 / 全部个人空间模式 / 勾选了空间，任一即启用
-const kbOn = computed(() =>
-  kbPrefs.value.include_hub
-  || kbPrefs.value.spaces_mode === 'all'
-  || kbPrefs.value.enabled_spaces.length > 0,
-)
-// 「我的知识空间」开关 = 模式切换：开=全部参与；关=按勾选（可全不选=仅知识中心）
-const kbSpacesAll = computed(() => kbPrefs.value.spaces_mode !== 'custom')
-const spacesTip = computed(() => {
-  const n = kbPrefs.value.enabled_spaces.length
-  if (kbPrefs.value.spaces_mode === 'all') return `启用全部 ${kbSpaces.value.length || '…'} 个个人空间`
-  return n ? `已启用 ${n} 个` : '未启用空间（仅知识中心参与）'
-})
-
-async function loadKbPrefs() {
-  try {
-    const res: any = await getKbChatPrefs()
-    if (res) kbPrefs.value = { ...kbPrefs.value, ...res }
-  } catch { /* 插件未装/未授权：静默降级 */ }
-  try {
-    const sp: any = await getKbSpaces()
-    kbSpaces.value = sp?.items ?? []
-  } catch { /* 同上 */ }
-}
-
-function onAllSpacesChange(val: boolean) {
-  // 开=全部参与（保留勾选存储，切回勾选模式时恢复）；关=进入勾选模式（列表不动，允许全不选）
-  kbPrefs.value.spaces_mode = val ? 'all' : 'custom'
-  saveKbPrefs()
-}
-
-async function saveKbPrefs() {
-  try {
-    await putKbChatPrefs({
-      include_hub: kbPrefs.value.include_hub,
-      spaces_mode: kbPrefs.value.spaces_mode,
-      enabled_spaces: kbPrefs.value.enabled_spaces,
-      memory_enabled: kbPrefs.value.memory_enabled,
-      auto_inject: kbPrefs.value.auto_inject,
-    })
-    ElMessage({ message: '知识库配置已保存', type: 'success', grouping: true })
-  } catch { /* 拦截器已提示 */ }
-}
 
 // 会话列表来自全局 store（切页面后状态仍在）
 const sessions = computed(() => store.sessions)
@@ -1035,7 +916,7 @@ function onResize() {
 
 onMounted(async () => {
   window.addEventListener('resize', onResize)
-  await Promise.all([loadProviders(), loadSessions(), loadKbPrefs()])
+  await Promise.all([loadProviders(), loadSessions()])
   // 清理卸载期间滞留的终态 run（历史里已含其内容）
   store.sweepTerminalRuns()
   // 恢复上次会话视图（含运行中的 run 续流）
@@ -1799,67 +1680,6 @@ html.dark .session-item.archived .session-item-title {
   color: var(--text-secondary, #909399);
   cursor: default;
 }
-.tools-toggle.kb-active {
-  color: var(--el-color-primary, #409eff);
-}
-.kb-dot-badge {
-  transform: scale(0.8);
-  margin-left: -2px;
-}
-
-/* 启用角标跟随主题色（el-badge 默认红色太突兀） */
-.kb-dot-badge :deep(.el-badge__content) {
-  background-color: var(--el-color-primary);
-}
-
-/* 知识库偏好弹层 */
-.kb-prefs-panel {
-  font-size: 13px;
-}
-.kb-prefs-title {
-  font-weight: 600;
-  margin-bottom: 10px;
-}
-.kb-prefs-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 10px;
-}
-.kb-prefs-label {
-  font-size: 13px;
-  color: var(--el-text-color-primary);
-}
-.kb-prefs-tip {
-  font-size: 11px;
-  line-height: 1.5;
-  color: var(--el-text-color-secondary);
-  margin-top: 2px;
-}
-.kb-prefs-divider {
-  border-top: 1px dashed var(--el-border-color-lighter);
-  margin: 4px 0 10px;
-}
-
-.kb-spaces-list {
-  max-height: 160px;
-  overflow-y: auto;
-  margin: -4px 0 8px;
-  padding: 6px 8px;
-  border-radius: 8px;
-  background: var(--el-fill-color-light);
-}
-
-.kb-spaces-list :deep(.el-checkbox) {
-  display: flex;
-  width: 100%;
-  margin-right: 0;
-  height: 26px;
-}
-.kb-prefs-foot {
-  margin-top: 4px;
-}
 .char-count {
   font-size: 11px;
   color: var(--text-secondary, #c0c4cc);
@@ -1939,6 +1759,112 @@ html.dark .session-item.archived .session-item-title {
   }
   .composer-area {
     padding: 2px 10px calc(10px + env(safe-area-inset-bottom, 0px));
+  }
+
+  /* ===== 手机窄屏（≤640px）：输入框工具栏改两行布局 ===== */
+  @media (max-width: 640px) {
+    /* 工具栏纵向下排：第一行 工具开关+会话操作，第二行 下拉+发送，行间距拉开 */
+    .composer-toolbar {
+      flex-wrap: wrap;
+      gap: 8px 6px;
+      margin-top: 8px;
+    }
+    .composer-left,
+    .composer-right {
+      flex: 1 1 100%;       /* 各占整行 */
+      justify-content: flex-start;
+      flex-wrap: wrap;
+      gap: 6px;
+      min-height: 34px;     /* 保证不塌陷成竖排 */
+    }
+    .composer-right {
+      justify-content: space-between;
+    }
+    /* 「工具」永远横排：强制不收缩 */
+    .tools-toggle {
+      flex-shrink: 0;
+      white-space: nowrap;
+      gap: 5px;
+    }
+    .tools-toggle .el-switch {
+      flex-shrink: 0;
+    }
+    .toolbar-sep,
+    .toolbar-icon-btn {
+      flex-shrink: 0;
+    }
+    /* 下拉弹性收缩：可换行，长模型名内部省略 */
+    .composer-right .provider-select,
+    .composer-right .model-select {
+      flex: 1 1 auto;
+      min-width: 0;
+      width: auto;           /* 覆盖 96/108px 固定宽，改为弹性 */
+      max-width: 46%;
+    }
+    .composer-right :deep(.el-select__wrapper) {
+      min-width: 0;
+    }
+    .composer-right :deep(.el-select__selected-item),
+    .composer-right :deep(.el-select__placeholder) {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 100%;
+    }
+    /* 发送按钮右侧定位，不挤压下拉 */
+    .send-square,
+    .stop-square {
+      flex-shrink: 0;
+      margin-left: auto;
+    }
+    .send-square + .stop-square,
+    .stop-square + .send-square {
+      margin-left: 0;
+    }
+    .char-count {
+      flex-shrink: 0;
+    }
+  }
+
+  /* ===== 极窄屏（≤480px）：分组分区强化 + 操作行呼吸感 ===== */
+  @media (max-width: 480px) {
+    .composer-toolbar {
+      gap: 10px 10px;
+    }
+    /* 第一行（工具开关组）与第二行（模型选择组）：加分隔线 + 组间距 */
+    .composer-left {
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border-light, #e4e7ed);
+    }
+    .composer-right {
+      padding-top: 8px;
+      gap: 10px;
+    }
+    .composer-right .provider-select,
+    .composer-right .model-select {
+      flex: 1 1 44%;
+      max-width: 44%;
+    }
+    .composer-right :deep(.el-select__selected-item),
+    .composer-right :deep(.el-select__placeholder) {
+      font-size: 12px;
+    }
+    /* 发送按钮独立右下角：与下拉解耦（375px 下两者同排重叠） */
+    .composer-right {
+      flex-wrap: wrap;
+    }
+    .composer-right .send-square,
+    .composer-right .stop-square {
+      flex: 0 0 44px;
+      max-width: 44px;
+      margin-top: 10px;   /* 与下拉行拉开垂直间距 */
+      margin-left: auto;  /* 右对齐输入卡右内边距 */
+    }
+    .composer-right .provider-select,
+    .composer-right .model-select {
+      flex: 1 1 calc(50% - 10px);
+      max-width: calc(50% - 10px);
+    }
   }
 }
 
