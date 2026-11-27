@@ -212,7 +212,9 @@
             :autosize="{ minRows: isMobile ? 2 : 1, maxRows: 6 }"
             :placeholder="isMobile ? '输入消息…' : '输入消息，Enter 发送，Shift+Enter 换行'"
             resize="none"
-            @keydown.enter.exact.prevent="sendMessage"
+            @keydown.enter.exact.prevent="onEnterKey"
+            @compositionstart="imeComposing = true"
+            @compositionend="imeComposing = false"
           />
           <div class="composer-toolbar">
             <div class="composer-left">
@@ -673,6 +675,14 @@ function handleScroll() {
 // ---------- 发送 ----------
 function sendQuickMessage(text: string) {
   inputText.value = text
+  sendMessage()
+}
+
+// IME 组合输入守卫：拼音/注音逐字选词按下的 Enter 属于输入法确认，
+// 不应触发发送（否则「hi」会被拆成多次字符级消息提交——线上 276 会话实测复现）。
+let imeComposing = false as boolean
+function onEnterKey() {
+  if (imeComposing) return
   sendMessage()
 }
 
@@ -1344,6 +1354,12 @@ html.dark .session-item.archived .session-item-title {
   flex-direction: column;
   align-items: flex-end;
 }
+/* 用户消息主容器按内容自适应宽（fit-content），防止 flex 交叉轴收缩把
+   气泡压成 1 字符宽——移动端极窄时出现过 'h'/'i' 被迫换行成竖排的现象 */
+.message-row.user .msg-main {
+  width: fit-content;
+  max-width: 100%;
+}
 .msg-main {
   min-width: 0;
   max-width: 100%;
@@ -1396,6 +1412,8 @@ html.dark .session-item.archived .session-item-title {
   background: var(--fill-light, #f0f2f5);
   color: var(--text-primary, #303133);
   max-width: 78%;
+  white-space: pre-wrap;      /* 尊重真实换行；正常短词不再被容器宽度强行折行 */
+  min-width: fit-content;    /* 短内容（如 'hi'）永不折叠成竖排 */
 }
 .message-row.is-pending .message-content {
   opacity: 0.75;
