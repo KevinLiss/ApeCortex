@@ -76,6 +76,7 @@
           <el-option label="DeepSeek" value="deepseek" />
           <el-option label="通义千问 (Qwen)" value="qwen" />
           <el-option label="智谱 GLM" value="glm" />
+          <el-option label="MiniMax" value="minimax" />
           <el-option label="OpenAI" value="openai" />
           <el-option label="自定义 (Custom)" value="custom" />
         </el-select>
@@ -89,7 +90,7 @@
         />
       </el-form-item>
       <el-form-item label="API 地址" prop="base_url">
-        <el-input v-model="form.base_url" placeholder="如：https://api.deepseek.com" />
+        <el-input v-model="form.base_url" placeholder="如：https://api.deepseek.com 或 https://api.minimaxi.com/v1" />
       </el-form-item>
       <el-form-item label="模型列表" prop="models">
         <div class="models-editor">
@@ -192,6 +193,7 @@ const PROVIDER_PRESETS: Record<string, { base_url: string; models: string[] }> =
   deepseek: { base_url: 'https://api.deepseek.com', models: ['deepseek-chat', 'deepseek-reasoner'] },
   qwen: { base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', models: ['qwen-plus', 'qwen-max', 'qwen-turbo'] },
   glm: { base_url: 'https://open.bigmodel.cn/api/paas/v4', models: ['glm-4-flash', 'glm-4', 'glm-4-air'] },
+  minimax: { base_url: 'https://api.minimaxi.com/v1', models: ['MiniMax-M2.5', 'MiniMax-M2.5-highspeed', 'MiniMax-M3', 'MiniMax-M3.1-Flash'] },
   openai: { base_url: 'https://api.openai.com/v1', models: ['gpt-4o-mini', 'gpt-4o', 'gpt-4-turbo'] },
   custom: { base_url: '', models: [] },
 }
@@ -209,6 +211,7 @@ function providerTypeLabel(type: string): string {
     deepseek: 'DeepSeek',
     qwen: '通义千问',
     glm: '智谱GLM',
+    minimax: 'MiniMax',
     openai: 'OpenAI',
     custom: '自定义',
   }
@@ -220,6 +223,7 @@ function providerTagType(type: string): string {
     deepseek: 'primary',
     qwen: 'success',
     glm: 'warning',
+    minimax: 'danger',
     openai: 'info',
     custom: '',
   }

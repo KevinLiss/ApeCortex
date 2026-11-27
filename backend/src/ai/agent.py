@@ -8,6 +8,7 @@ Flow:
 """
 
 import json
+import re
 from typing import Any, AsyncGenerator
 
 import httpx
@@ -20,11 +21,46 @@ from src.db import SessionLocal
 from src.models import User
 from src.models.ai import AiProvider
 
+
+# ---------------------------------------------------------------------------
+# LLM HTTP 错误 → 用户可读中文提示
+# 供 _call_llm / _call_llm_stream 共用；未命中时回退原始报错（保留诊断信息）。
+# ---------------------------------------------------------------------------
+_LLM_ERROR_MAP: dict[int, str] = {
+    401: "模型密钥无效或已过期，请到「AI 助手 → 模型密钥管理」检查 Key",
+    402: "模型账户余额不足，请充值后重试（后台→模型密钥管理可换供应商）",
+    403: "模型访问被拒绝：该 Key 无权调用此模型，或账号已被封禁",
+    404: "模型不存在或接口地址不正确，请检查供应商 Base URL 与模型名",
+    429: "请求过于频繁或超出限流，请稍后重试",
+    500: "模型服务内部错误，请稍后重试或切换其他模型",
+    502: "模型服务不可用（网关错误），请稍后重试",
+    503: "模型服务暂时不可用（过载/维护中），请稍后重试",
+    504: "模型服务响应超时，请稍后重试",
+}
+
+
+def _friendly_llm_error(status_code: int, error_body: str) -> str:
+    """把 LLM HTTP 错误转成给用户看的中文提示。
+
+    未识别的状态码原样保留；正文截断到 200 字符防长 JSON 刷屏。
+    """
+    friendly = _LLM_ERROR_MAP.get(status_code)
+    if not friendly:
+        return f"模型接口返回 {status_code}: {error_body[:200]}"
+    return f"{friendly}（接口返回 {status_code}）"
+
+
+def _clean_error_body(error_body: str) -> str:
+    """从 JSON 错误体里提取 message 字段，其余噪声截断。"""
+    m = re.search(r'"message"\s*:\s*"([^"]{1,200})', error_body)
+    return m.group(1) if m else error_body[:200] if error_body else "(空响应)"
+
 # Provider default base URLs and model mappings
 PROVIDER_DEFAULTS: dict[str, dict[str, str]] = {
     "deepseek": {"base_url": "https://api.deepseek.com", "default_model": "deepseek-chat"},
     "qwen": {"base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "default_model": "qwen-plus"},
     "glm": {"base_url": "https://open.bigmodel.cn/api/paas/v4", "default_model": "glm-4-flash"},
+    "minimax": {"base_url": "https://api.minimaxi.com/v1", "default_model": "MiniMax-M2.5"},
     "openai": {"base_url": "https://api.openai.com/v1", "default_model": "gpt-4o-mini"},
     "custom": {"base_url": "", "default_model": ""},
 }
@@ -49,10 +85,24 @@ SYSTEM_PROMPT = """你是 ApeAdmin 智能管理助手，可以帮助用户通过
 
 
 def _get_provider_config(provider: AiProvider) -> dict[str, str]:
-    """Get base_url and default model for a provider."""
+    """Get base_url and default model for a provider.
+
+    default_model 回退链：provider_type 预设 → 供应商 models 列表首项。
+    （MiniMax 等新供应商落库时 provider_type 可能未带预设，models 首项兜底，
+    避免「未选模型」时把 deepseek 模型名发给 MiniMax 导致 400 unknown model。）
+    """
     defaults = PROVIDER_DEFAULTS.get(provider.provider_type, PROVIDER_DEFAULTS["custom"])
     base_url = provider.base_url or defaults["base_url"]
-    return {"base_url": base_url, "default_model": defaults["default_model"]}
+    default_model = defaults["default_model"]
+    if not default_model:
+        models_list = provider.models or "[]"
+        try:
+            parsed = json.loads(models_list) if isinstance(models_list, str) else models_list
+            if parsed:
+                default_model = parsed[0]
+        except (json.JSONDecodeError, TypeError, IndexError):
+            pass
+    return {"base_url": base_url, "default_model": default_model}
 
 
 def _build_tools_for_llm(tools_enabled: bool) -> list[dict[str, Any]]:
@@ -88,11 +138,18 @@ async def _call_llm(
 
     url = f"{base_url.rstrip('/')}/chat/completions"
     async with httpx.AsyncClient(timeout=120.0, trust_env=False) as client:
-        resp = await client.post(url, headers=headers, json=body)
+        try:
+            resp = await client.post(url, headers=headers, json=body)
+        except httpx.TimeoutException as exc:
+            logger.error(f"LLM API 超时 {url}: {exc}")
+            raise RuntimeError("模型服务响应超时（120 秒），请稍后重试或切换其他模型") from exc
+        except httpx.HTTPError as exc:
+            logger.error(f"LLM API 连接失败 {url}: {exc}")
+            raise RuntimeError(f"无法连接模型服务，请检查供应商地址是否可达（{exc.__class__.__name__}）") from exc
         if resp.status_code >= 400:
             error_body = resp.text
             logger.error(f"LLM API 调用失败 [{resp.status_code}] {url}: {error_body[:500]}")
-            raise RuntimeError(f"模型接口返回 {resp.status_code}: {error_body[:300]}")
+            raise RuntimeError(_friendly_llm_error(resp.status_code, _clean_error_body(error_body)))
         return resp.json()
 
 
@@ -123,11 +180,19 @@ async def _call_llm_stream(
 
     url = f"{base_url.rstrip('/')}/chat/completions"
     async with httpx.AsyncClient(timeout=120.0, trust_env=False) as client:
-        async with client.stream("POST", url, headers=headers, json=body) as resp:
+        try:
+            stream_ctx = client.stream("POST", url, headers=headers, json=body)
+        except httpx.TimeoutException as exc:
+            logger.error(f"LLM API 建连超时 {url}: {exc}")
+            raise RuntimeError("模型服务建连超时，请稍后重试或切换其他模型") from exc
+        except httpx.HTTPError as exc:
+            logger.error(f"LLM API 连接失败 {url}: {exc}")
+            raise RuntimeError(f"无法连接模型服务，请检查供应商地址是否可达（{exc.__class__.__name__}）") from exc
+        async with stream_ctx as resp:
             if resp.status_code >= 400:
                 error_body = (await resp.aread()).decode("utf-8", errors="replace")
                 logger.error(f"LLM API 流式调用失败 [{resp.status_code}] {url}: {error_body[:500]}")
-                raise RuntimeError(f"模型接口返回 {resp.status_code}: {error_body[:300]}")
+                raise RuntimeError(_friendly_llm_error(resp.status_code, _clean_error_body(error_body)))
             async for line in resp.aiter_lines():
                 if line.startswith("data: "):
                     chunk = line[6:]

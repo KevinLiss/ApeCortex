@@ -742,7 +742,9 @@ function showFailureGuide(errorMsg: string) {
   // 命中这几类错误时给出配置引导（后端 400 的 provider 错误 / 网络代理端口错误）
   const needsConfig =
     /未配置.*供应商|供应商不存在|已被禁用|no provider|provider_not/i.test(msg) ||
-    /api.?key|401|invalid.*key|key.*invalid/i.test(msg) ||
+    /api.?key|invalid.*key|key.*invalid/i.test(msg) ||
+    /密钥无效|余额不足|限流|无法连接模型服务/i.test(msg) ||
+    /接口返回 401|接口返回 402|接口返回 403|接口返回 429/i.test(msg) ||
     /invalid port|proxy|代理|connect|timeout|network/i.test(msg)
   if (needsConfig) {
     ElMessageBox.alert(
